@@ -174,7 +174,12 @@ def monitor_results(version_id, minute):
     })
 
 
+@app.route('/ping')
+def ping():
+    """Simple handler used to check if the server is running."""
+    return flask.Response('pong', mimetype='text/plain')
+
+
 if __name__ == "__main__":
     # Start the server running
     app.run(host="0.0.0.0", port=9340)
-
