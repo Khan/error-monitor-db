@@ -82,6 +82,14 @@ class ErrorMonitorTest(unittest.TestCase):
         assert 'errors' in ret
         assert len(ret['errors']) == 2
 
+        # The same analysis with an invalid version would *not* report any
+        # errors, because we have no data for the supposedly successful
+        # previous version
+        rv = self.app.get('/errors/v001/monitor/0?verify_versions=vINVALID')
+        ret = json.loads(rv.data)
+        assert 'errors' in ret
+        assert ret['errors'] == []
+
         # Now add some actual errors
         monitor_data = {
             'logs': [

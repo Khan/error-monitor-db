@@ -104,6 +104,9 @@ def monitor():
             str(log['status']), str(log['level']), log['resource'], log['ip'],
             log['route'], log['module_id'], log['message'])
 
+    # Track that we've seen at least some logs from this GAE version and minute
+    models.record_monitoring_data_received(version, minute)
+
     return "OK"
 
 
@@ -127,7 +130,18 @@ def monitor_results(version_id, minute):
     verify_versions = flask.request.args.get('verify_versions')
     if not verify_versions:
         return "Invalid parameters", 400
-    verify_versions = verify_versions.split(",")
+
+    # Parse verify_versions and skip any versions we haven't actually received
+    # log data for
+    orig_versions = verify_versions.split(",")
+    verify_versions = [
+            v for v in orig_versions
+            if models.check_monitoring_data_received(v, minute)]
+
+    ignored_versions = set(orig_versions) - set(verify_versions)
+    if ignored_versions:
+        logging.warning("Ignoring versions with no data for minute %d: %s" %
+                (minute, ignored_versions))
 
     # Get all the previous error counts in the versions we're verifying against
     version_counts_by_key = {}

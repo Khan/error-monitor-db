@@ -353,6 +353,21 @@ def get_monitoring_errors(version, minute):
     return [(_get_cached_error_def(k), count) for k, count in keys]
 
 
+def record_monitoring_data_received(version, minute):
+    """Track that we've received log data for the GAE version and minute.
+
+    We use these "seen" flags to determine whether we have data for this
+    version to compare future versions against.
+    """
+    r.hset("ver:%s:seen" % version, minute, 1)
+    r.expire("ver:%s:seen" % version, KEY_EXPIRY_SECONDS)
+
+
+def check_monitoring_data_received(version, minute):
+    """Check that we have received log data for the GAE version and minute."""
+    return r.hget("ver:%s:seen" % version, minute) is not None
+
+
 def record_occurrence_during_monitoring(version, minute, status, level,
         resource, ip, route, module, message):
     """Store a new error instance which was seen while monitoring a deploy.
