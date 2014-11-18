@@ -353,6 +353,21 @@ def get_monitoring_errors(version, minute):
     return [(_get_cached_error_def(k), count) for k, count in keys]
 
 
+def lookup_monitoring_error(version, minute, error_key):
+    """Check if an error was reported by the GAE version at this minute.
+
+    'minute' identifies a slice of time some number of minutes after monitoring
+    started that we are fetching errors for, so 0 is the first 60 seconds after
+    monitoring, 1 is the next 60 seconds, etc.
+
+    Returns True if we have monitoring data for this time slice and the error
+    with the key 'error_key' was included in that data.
+    """
+    return (r.zscore(
+        "ver:%s:errors_by_minute:%d" % (version, minute), error_key)
+        is not None)
+
+
 def record_monitoring_data_received(version, minute):
     """Track that we've received log data for the GAE version and minute.
 

@@ -110,6 +110,15 @@ class ErrorMonitorTest(unittest.TestCase):
                 {"status": 500, "level": 4, "resource": "/leia",
                     "ip": "1.1.1.1", "route": "/leia", "module_id": "default",
                     "message": "Help me, Obi Wan Kenobi. You're my only hope"},
+                {"status": 500, "level": 4, "resource": "/leia",
+                    "ip": "1.1.1.1", "route": "/leia", "module_id": "default",
+                    "message": "Help me, Obi Wan Kenobi. You're my only hope"},
+                {"status": 500, "level": 4, "resource": "/leia",
+                    "ip": "1.1.1.1", "route": "/leia", "module_id": "default",
+                    "message": "Help me, Obi Wan Kenobi. You're my only hope"},
+                {"status": 500, "level": 4, "resource": "/leia",
+                    "ip": "1.1.1.1", "route": "/leia", "module_id": "default",
+                    "message": "Help me, Obi Wan Kenobi. You're my only hope"},
 
                 # This is a brand new error. We want to know about it even
                 # though it only happened once

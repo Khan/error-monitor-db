@@ -172,6 +172,17 @@ def monitor_results(version_id, minute):
                 version_counts, monitor_count)
 
         if probability >= 0.9995:
+            if monitor_count < 5:
+                # Special-case for really infrequent errors! Only error if we
+                # haven't seen this error before in *any* minute of a previous
+                # deploy. Otherwise this is a known low-frequency error and
+                # will just look like spam
+                if any(models.lookup_monitoring_error(version, m, error["key"])
+                       for m in xrange(10)
+                       for version in verify_versions):
+                    # Don't error on low-frequency errors we've seen before
+                    continue
+
             significant_errors.append({
                 "key": error["key"],
                 "status": int(error["status"]),
