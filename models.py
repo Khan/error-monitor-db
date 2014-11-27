@@ -65,6 +65,9 @@ For each error class we track the following data per /occurrence/:
 
 We write to the following Redis keys:
 
+    (NOTE: Sorted sets in Redis are maps of {string: int} ordered by value, and
+     in this case the value is the incidence count.)
+
     // Error definition (static for each error class)
 
     error:<key> - JSONified error_def for the error class identified by 'key'
@@ -72,12 +75,14 @@ We write to the following Redis keys:
     errordef:id0 ... errordef:id3 - Hashtables of identifier -> error key for
         various identifier types
 
-    // Monitoring keys
+
+    // Error occurrence information by version
+
+    (NOTE: When an error occurs during monitoring, the version is prefixed with
+     "MON_" to keep monitoring errors separate from errors scraped from the
+     BigQuery logs.)
 
     ver:<version>:errors - Sorted set of error keys seen on this GAE version
-
-    ver:<version>:errors_by_minute:<minute> - Sorted set of error keys seen
-        during a 60-second interval 'minute' minutes after monitoring has begun
 
     ver:<version>:error:<key>:ips - Sorted set of IPs associated with the error
 
@@ -96,8 +101,24 @@ We write to the following Redis keys:
     ver:<version>:error:<key>:modules - Sorted set of GAE modules associated
         with the error
 
-    (NOTE: Sorted sets in Redis are maps of {string: int} ordered by value, and
-    in this case the value is the incidence count.)
+
+    // Monitoring only
+
+    ver:<version>:errors_by_minute:<minute> - Sorted set of error keys seen
+        during a 60-second interval 'minute' minutes after monitoring has begun
+
+
+    // BigQuery logs only
+
+    first_seen:<key> - The first log hour when this error appeared in the logs
+
+    last_seen:<key> - The latest log hour when this error appeared in the logs
+
+    ver:<version>:error:<key>:hours_seen - A dictionary of each log hour when
+        this error appeared in this version's logs and the occurrence count
+        for that hour
+    
+
 """
 
 import json
@@ -174,7 +195,7 @@ def _get_cached_error_def(error_key):
 def _find_error_by_def(error_def):
     """Find an existing error by the identifying information in error_def.
 
-    If sucessful, return the error key. Otherwise return None.
+    If successful, return the error key. Otherwise return None.
     """
     # Try to match by hash
     if (error_def['key'] in _error_def_cache or
@@ -332,67 +353,93 @@ def _parse_message(message, status, level):
     return (error_def, stack, stack_key)
 
 
+def get_error_summary_info(error_key):
+    """Retrieve error summary information from Redis.
+    
+    The format of the summary information is:
+
+        "error_def" - See _parse_message for the error def format
+
+        "versions" - A dictionary storing occurrence counts per GAE version.
+            Occurrences during monitoring are returned separately from errors
+            from BigQuery and the versions for those are prefixed with "MON_".
+
+        "first_seen" - The log hour in which this error was first observed (not
+            including logs observed while monitoring)
+
+        "last_seen" - The log hour in which this error was last observed (not
+            including logs observed while monitoring)
+
+        "by_hour_and_version" - A list of structs, one for each "version" and
+            "hour" that we observed the error on, and the occurrence "count"
+            (not including errors observed while monitoring)
+
+    """
+    error_def = _get_cached_error_def(error_key)
+    if not error_def:
+        return None
+
+    versions = r.zrevrange("%s:versions" % error_key, 0, -1, withscores=True)
+
+    by_hour_and_version = []
+    for version, _ in versions:
+        hours_seen = r.hgetall("ver:%s:error:%s:hours_seen" % (
+            version, error_key))
+        if hours_seen:
+            for hour, count in hours_seen.iteritems():
+                by_hour_and_version.append({
+                    "hour": hour,
+                    "version": version,
+                    "count": count
+                })
+    
+    error_info = {
+        "error_def": error_def,
+        "versions": dict(versions),
+        "first_seen": r.get("first_seen:%s" % error_key),
+        "last_seen": r.get("last_seen:%s" % error_key),
+        "by_hour_and_version": by_hour_and_version
+    }
+
+    return error_info
+
+
 ####
-## Methods specific to deploy-time monitoring
+## Common error-tracking methods
 ####
 
-
-def get_monitoring_errors(version, minute):
-    """Return a list of the top errors found in a specific version.
-
-    'minute' identifies a slice of time some number of minutes after monitoring
-    started that we are fetching errors for, so 0 is the first 60 seconds after
-    monitoring, 1 is the next 60 seconds, etc.
-
-    The returned list will be ordered by the number of occurrences in the
-    requested version and each entry is a tuple with format
-    (error_def, count) where error_def is a dictionary and count is a number.
-    """
-    keys = r.zrevrange("ver:%s:errors_by_minute:%d" % (version, minute),
-            0, 1000, True)
-    return [(_get_cached_error_def(k), count) for k, count in keys]
-
-
-def lookup_monitoring_error(version, minute, error_key):
-    """Check if an error was reported by the GAE version at this minute.
-
-    'minute' identifies a slice of time some number of minutes after monitoring
-    started that we are fetching errors for, so 0 is the first 60 seconds after
-    monitoring, 1 is the next 60 seconds, etc.
-
-    Returns True if we have monitoring data for this time slice and the error
-    with the key 'error_key' was included in that data.
-    """
-    return (r.zscore(
-        "ver:%s:errors_by_minute:%d" % (version, minute), error_key)
-        is not None)
-
-
-def record_monitoring_data_received(version, minute):
-    """Track that we've received log data for the GAE version and minute.
-
-    We use these "seen" flags to determine whether we have data for this
-    version to compare future versions against.
-    """
-    r.hset("ver:%s:seen" % version, minute, 1)
-    r.expire("ver:%s:seen" % version, KEY_EXPIRY_SECONDS)
-
-
-def check_monitoring_data_received(version, minute):
-    """Check that we have received log data for the GAE version and minute."""
-    return r.hget("ver:%s:seen" % version, minute) is not None
-
-
-def record_occurrence_during_monitoring(version, minute, status, level,
-        resource, ip, route, module, message):
+def _update_error_details(version, status, level, resource, ip, route,
+                              module, message):
     """Store a new error instance which was seen while monitoring a deploy.
 
     All the Redis keys for the data is prefixed with the version so they
-    can be queried and expired separately from the other versions.
+    can be queried and expired separately from the other versions. Errors seen
+    during monitoring are recorded with "MON_" prepended to the version in
+    order to avoid double-counting those errors.
+
+    'version' is the GAE version name this error was logged on.
+
+    'status' is the HTTP status code for the request (an integer).
+
+    'level' is either 3 for ERROR or 4 for CRITICAL.
+
+    'resource' is the URI the request was serving.
+
+    'ip' is the client IP for the request. Internal requests (e.g. task
+    queues) are all going to have the same internal system IP.
+
+    'route' is the route specifier which represents the handler function that
+    handled the request.
+
+    'module' is the GAE module that the instance handling the request was
+    running.
+
+    'message' is the recorded error message, including the stack in the case
+    of an exception (in which case it contains multiple lines).
     """
     if any(resource.startswith(uri) for uri in URI_BLACKLIST):
         # Ignore particularly spammy URIs
-        return
+        return None
 
     # Parse the message to extract the title, identifying information, and
     # parsed stack trace
@@ -412,7 +459,7 @@ def record_occurrence_during_monitoring(version, minute, status, level,
     # busting param doesn't indicate anything semantic about the API call
     resource = _CACHE_BUST_QUERY_PARAM_RE.sub('', resource)
 
-    # Record how many unique IPs have hit this endpoint, and also how many 
+    # Record how many unique IPs have hit this endpoint, and also how many
     # times each of them hit the error.
     r.zincrby("%s:ips" % key_prefix, ip)
     r.expire("%s:ips" % key_prefix, KEY_EXPIRY_SECONDS)
@@ -443,6 +490,127 @@ def record_occurrence_during_monitoring(version, minute, status, level,
     # and by the time elapsed since we started monitoring
     r.zincrby("ver:%s:errors" % version, error_key)
     r.expire("ver:%s:errors" % version, KEY_EXPIRY_SECONDS)
-    r.zincrby("ver:%s:errors_by_minute:%d" % (version, minute), error_key)
-    r.expire("ver:%s:errors_by_minute:%d" % (version, minute),
-            KEY_EXPIRY_SECONDS)
+
+    # Record a hit for the version
+    r.zincrby("%s:versions" % error_key, version)
+    r.expire("%s:versions" % error_key, KEY_EXPIRY_SECONDS)
+
+    return error_key
+
+
+####
+## Methods specific to deploy-time monitoring
+####
+
+
+def get_monitoring_errors(version, minute):
+    """Return a list of the top errors found in a specific version.
+
+    'minute' identifies a slice of time some number of minutes after monitoring
+    started that we are fetching errors for, so 0 is the first 60 seconds after
+    monitoring, 1 is the next 60 seconds, etc.
+
+    The returned list will be ordered by the number of occurrences in the
+    requested version and each entry is a tuple with format
+    (error_def, count) where error_def is a dictionary and count is a number.
+    """
+    keys = r.zrevrange("ver:MON_%s:errors_by_minute:%d" % (version, minute),
+            0, 1000, withscores=True)
+    return [(_get_cached_error_def(k), count) for k, count in keys]
+
+
+def lookup_monitoring_error(version, minute, error_key):
+    """Check if an error was reported by the GAE version at this minute.
+
+    'minute' identifies a slice of time some number of minutes after monitoring
+    started that we are fetching errors for, so 0 is the first 60 seconds after
+    monitoring, 1 is the next 60 seconds, etc.
+
+    Returns True if we have monitoring data for this time slice and the error
+    with the key 'error_key' was included in that data.
+    """
+    return (r.zscore(
+        "ver:MON_%s:errors_by_minute:%d" % (version, minute), error_key)
+        is not None)
+
+
+def record_monitoring_data_received(version, minute):
+    """Track that we've received log data for the GAE version and minute.
+
+    We use these "seen" flags to determine whether we have data for this
+    version to compare future versions against.
+    """
+    r.hset("ver:MON_%s:seen" % version, minute, 1)
+    r.expire("ver:MON_%s:seen" % version, KEY_EXPIRY_SECONDS)
+
+
+def check_monitoring_data_received(version, minute):
+    """Check that we have received log data for the GAE version and minute."""
+    return r.hget("ver:MON_%s:seen" % version, minute) is not None
+
+
+def record_occurrence_during_monitoring(version, minute, status, level,
+                                        resource, ip, route, module, message):
+    """Store error details for an occurrence seen while monitoring GAE logs.
+
+    'version', 'status', 'level', 'resource', 'ip', 'route', 'module', and
+    'message' are all documented in `_update_error_details`.
+
+    'minute' identifies a slice of time some number of minutes after monitoring
+    started that we are fetching errors for, so 0 is the first 60 seconds after
+    monitoring, 1 is the next 60 seconds, etc.
+    """
+    error_key = _update_error_details(
+        "MON_%s" % version, status, level, resource, ip, route, module,
+        message)
+
+    if error_key:
+        r.zincrby("ver:MON_%s:errors_by_minute:%d" % (version, minute),
+                  error_key)
+        r.expire("ver:MON_%s:errors_by_minute:%d" % (version, minute),
+                 KEY_EXPIRY_SECONDS)
+
+
+####
+## Log scraping from BigQuery
+####
+
+
+def record_occurrence_from_logs(version, log_hour, status, level, resource, ip,
+                                route, module, message):
+    """Store error details for an occurrence seen while scraping GAE app logs.
+
+    'version', 'status', 'level', 'resource', 'ip', 'route', 'module', and
+    'message' are all documented in `_update_error_details`.
+
+    'log_hour' is the suffix of the BigQuery dataset name, which is a string
+    in the format 'YYYYMMDD_HH', for example '20141120_10'. This is
+    convenient because string ordering is chronological.
+    """
+
+    error_key = _update_error_details(
+        version, status, level, resource, ip, route, module, message)
+
+    if error_key:
+        # Record a hit for a specific hour on a specific version, to get more
+        # granular time stats
+
+        r.hincrby("ver:%s:error:%s:hours_seen" % (version, error_key),
+                log_hour, 1)
+        r.expire("ver:%s:error:%s:hours_seen" % (version, error_key),
+                KEY_EXPIRY_SECONDS)
+
+        # Record the first and last time we've seen the error.
+
+        # Since log_hour is a string, use max char in case the key is missing
+        if log_hour < (r.get("first_seen:%s" % error_key) or "\xff"):
+            r.set("first_seen:%s" % error_key, log_hour)
+            r.expire("first_seen:%s" % error_key, KEY_EXPIRY_SECONDS)
+
+        if log_hour > r.get("last_seen:%s" % error_key):
+            r.set("last_seen:%s" % error_key, log_hour)
+            r.expire("last_seen:%s" % error_key, KEY_EXPIRY_SECONDS)
+
+    return error_key
+
+

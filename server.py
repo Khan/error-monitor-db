@@ -194,25 +194,22 @@ def monitor_results(version_id, minute):
                 "probability": probability
             })
 
-    """ Temporarily disable monitoring.
-
-        We are seeing a lot of errors that occur in bursts that show up as spam
-        in the monitoring logs. Until we can collect enough data to be able to
-        separate out the spam from the real errors, it's better to turn this
-        off completely.
- 
-        Additionally we are seeing failures (server 500s) at some unknown point
-        in the pipeline, which causes monitoring data to be flaky, exacerbating
-        the spam issue.
- 
-        TODO(tom) Re-enable this when we can check against errors from BigQuery
-        logs.
-    """
-    significant_errors = []
-
     return json.dumps({
         "errors": significant_errors
     })
+
+
+@app.route("/error/<error_key>", methods=["get"])
+def view_error(error_key):
+    """Summary information for a single error.
+    
+    See `get_error_summary_info` for more information.
+    """
+    info = models.get_error_summary_info(error_key)
+    if not info:
+        return "Error not found", 404
+
+    return json.dumps(info)
 
 
 @app.route('/ping')

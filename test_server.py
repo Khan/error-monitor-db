@@ -82,6 +82,23 @@ class ErrorMonitorTest(unittest.TestCase):
         assert 'errors' in ret
         assert len(ret['errors']) == 2
 
+        # Extract the error keys for the new errors and look them up by the
+        # first word in the message
+        error_keys = {
+            e['message'].split(" ")[0]: e['key']
+            for e in ret['errors']
+        }
+
+        # Request for summary info for a garbage error fails
+        rv = self.app.get("/error/GARBAGE")
+        assert rv.status_code == 404
+
+        # Request an actual error, see that it is reported for the monitoring
+        # version
+        rv = self.app.get("/error/%s" % error_keys["Help"])
+        assert rv.status_code == 200
+        assert '"MON_v001": 1' in rv.data
+
         # The same analysis with an invalid version would *not* report any
         # errors, because we have no data for the supposedly successful
         # previous version
@@ -141,6 +158,49 @@ class ErrorMonitorTest(unittest.TestCase):
         ret = json.loads(rv.data)
         assert 'errors' in ret
         assert len(ret['errors']) == 2
+
+        # Request the previous error again to see the new version added
+        rv = self.app.get("/error/%s" % error_keys["Help"])
+        assert rv.status_code == 200
+        assert '"MON_v001": 1' in rv.data
+        assert '"MON_v002": 6' in rv.data
+
+    def test_logs_from_bigquery(self):
+        # TODO(tom) Once BigQuery scraping is implemented, call that and mock
+        # out the relevant query functions
+
+        # Record an error a few different times over a few different hours
+        for i in xrange(5):
+            error_key = models.record_occurrence_from_logs(
+                version="v001", log_hour="20141110_0400", status=500, level=4,
+                resource="/omg", ip="2.2.2.2", route="/omg", module="default",
+                message="You can't handle the truth!")
+
+        for i in xrange(7):
+            models.record_occurrence_from_logs(
+                version="v001", log_hour="20141110_0500", status=500, level=4,
+                resource="/omg", ip="2.2.2.2", route="/omg", module="default",
+                message="You can't handle the truth!")
+
+        # Validate we stored all the correct data
+        rv = self.app.get("/error/%s" % error_key)
+        assert rv.status_code == 200
+
+        # Check error def is stored correctly
+        assert '"status": 500' in rv.data
+        assert '"level": 4' in rv.data
+        assert '"title": "You can\'t handle the truth!"' in rv.data
+
+        # Check version data is stored correctly
+        assert '"v001": 12' in rv.data
+        assert '"last_seen": "20141110_0500"' in rv.data
+        assert '"first_seen": "20141110_0400"' in rv.data
+        assert (
+            '"count": 5, "version": "v001", "hour": "20141110_0400"' in rv.data
+            )
+        assert (
+            '"count": 7, "version": "v001", "hour": "20141110_0500"' in rv.data
+            )
 
 
 if __name__ == '__main__':
