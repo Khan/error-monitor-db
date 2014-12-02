@@ -9,8 +9,6 @@ import scipy.stats
 
 import models
 
-ERROR_LEVELS = ["", "", "", "ERROR", "CRITICAL"]
-
 app = flask.Flask("Khan Academy Error Monitor")
 app.debug = True  # TODO(tom) STOPSHIP Take out before deploying to production
 
@@ -175,18 +173,23 @@ def monitor_results(version_id, minute):
             if monitor_count < 5:
                 # Special-case for really infrequent errors! Only error if we
                 # haven't seen this error before in *any* minute of a previous
-                # deploy. Otherwise this is a known low-frequency error and
+                # deploy or in the BigQuery logs for one of the known good
+                # versions. Otherwise this is a known low-frequency error and
                 # will just look like spam
-                if any(models.lookup_monitoring_error(version, m, error["key"])
-                       for m in xrange(10)
-                       for version in verify_versions):
+                error_info = models.get_error_summary_info(error["key"])
+                error_versions = error_info["versions"].keys()
+
+                if any((version in error_versions or
+                        ("MON_%s" % version) in error_versions)
+                       for version in orig_versions):
                     # Don't error on low-frequency errors we've seen before
+                    logging.warning("Not reporting error; too infrequent.")
                     continue
 
             significant_errors.append({
                 "key": error["key"],
                 "status": int(error["status"]),
-                "level": ERROR_LEVELS[int(error["level"])],
+                "level": models.ERROR_LEVELS[int(error["level"])],
                 "message": error["title"],
                 "minute": minute,
                 "monitor_count": monitor_count,

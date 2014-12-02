@@ -126,6 +126,10 @@ import md5
 import re
 import redis
 
+# GAE uses numbers internally to denote error level. We only care about levels
+# 3 and 4.
+ERROR_LEVELS = ["", "", "", "ERROR", "CRITICAL"]
+
 # URIs to ignore because they spam irrelevant errors
 URI_BLACKLIST = [
     '/api/internal/translate/lint_poentry'
@@ -293,7 +297,7 @@ def _parse_message(message, status, level):
     # Various identifying traits
     #
     # The title with numbers removed
-    id_prefix = "%s %s " % (status, level)
+    id_prefix = str("%s %s " % (status, level))
     error_def['id0'] = (
             id_prefix + re.sub(r'\d+', '%%', error_def['title']))
 
@@ -576,6 +580,17 @@ def record_occurrence_during_monitoring(version, minute, status, level,
 ####
 
 
+def record_log_data_received(log_hour):
+    """Track that we've received error data from the GAE logs (via BigQuery)."""
+    r.set("available_logs:%s" % log_hour, 1)
+    r.expire("available_logs:%s" % log_hour, KEY_EXPIRY_SECONDS)
+
+
+def check_log_data_received(log_hour):
+    """Check whether we have error data from BigQuery for the given hour."""
+    return r.get("available_logs:%s" % log_hour) is not None
+
+
 def record_occurrence_from_logs(version, log_hour, status, level, resource, ip,
                                 route, module, message):
     """Store error details for an occurrence seen while scraping GAE app logs.
@@ -590,6 +605,7 @@ def record_occurrence_from_logs(version, log_hour, status, level, resource, ip,
 
     error_key = _update_error_details(
         version, status, level, resource, ip, route, module, message)
+    is_new = False
 
     if error_key:
         # Record a hit for a specific hour on a specific version, to get more
@@ -606,11 +622,14 @@ def record_occurrence_from_logs(version, log_hour, status, level, resource, ip,
         if log_hour < (r.get("first_seen:%s" % error_key) or "\xff"):
             r.set("first_seen:%s" % error_key, log_hour)
             r.expire("first_seen:%s" % error_key, KEY_EXPIRY_SECONDS)
+            # This will be set incorrectly if we process logs in
+            # non-chronological order.
+            # Currently we only use this for alerting in HipChat so hopefully
+            # this won't be a huge issue.
+            is_new = True
 
         if log_hour > r.get("last_seen:%s" % error_key):
             r.set("last_seen:%s" % error_key, log_hour)
             r.expire("last_seen:%s" % error_key, KEY_EXPIRY_SECONDS)
 
-    return error_key
-
-
+    return error_key, is_new

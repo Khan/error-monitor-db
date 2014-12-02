@@ -1,5 +1,7 @@
 Flask
 redis
+oauth2client
+google-api-python-client
 
 # For unit tests
 fakeredis

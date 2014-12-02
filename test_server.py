@@ -3,6 +3,7 @@ import fakeredis
 import json
 import unittest
 
+import bigquery_import
 import models
 import server
 
@@ -169,21 +170,50 @@ class ErrorMonitorTest(unittest.TestCase):
         # TODO(tom) Once BigQuery scraping is implemented, call that and mock
         # out the relevant query functions
 
-        # Record an error a few different times over a few different hours
-        for i in xrange(5):
-            error_key = models.record_occurrence_from_logs(
-                version="v001", log_hour="20141110_0400", status=500, level=4,
-                resource="/omg", ip="2.2.2.2", route="/omg", module="default",
-                message="You can't handle the truth!")
+        # Mock out the actual BigQuery query mechanism
+        bigquery_import.BigQuery.__init__ = lambda self: None
+        bigquery_import.BigQuery.run_query = lambda self, sql: query_response
+        bq = bigquery_import.BigQuery()
 
-        for i in xrange(7):
-            models.record_occurrence_from_logs(
-                version="v001", log_hour="20141110_0500", status=500, level=4,
-                resource="/omg", ip="2.2.2.2", route="/omg", module="default",
-                message="You can't handle the truth!")
+        # Record an error a few different times over a few different hours
+        query_response = [{
+            "f": [
+                {"v": "0000-0000-0123456789ab"},
+                {"v": "2.2.2.2"},
+                {"v": "/omg"},
+                {"v": 500},
+                {"v": 4},
+                {"v": "You can't handle the truth!"},
+                {"v": "/omg"},
+                {"v": "default"}
+            ]
+        } for i in xrange(5)]
+        errors_4, new_errors_4 = bq.logs_from_bigquery("20141110_0400")
+
+        # There is only one error here, and it is new
+        assert len(errors_4) == 1
+        assert len(new_errors_4) == 1
+
+        query_response = [{
+            "f": [
+                {"v": "0000-0000-0123456789ab"},
+                {"v": "2.2.2.2"},
+                {"v": "/omg"},
+                {"v": 500},
+                {"v": 4},
+                {"v": "You can't handle the truth!"},
+                {"v": "/omg"},
+                {"v": "default"}
+            ]
+        } for i in xrange(7)]
+        errors_5, new_errors_5 = bq.logs_from_bigquery("20141110_0500")
+
+        # There is only one error here, and it is not new
+        assert len(errors_5) == 1
+        assert len(new_errors_5) == 0
 
         # Validate we stored all the correct data
-        rv = self.app.get("/error/%s" % error_key)
+        rv = self.app.get("/error/%s" % list(errors_4)[0])
         assert rv.status_code == 200
 
         # Check error def is stored correctly
@@ -192,15 +222,52 @@ class ErrorMonitorTest(unittest.TestCase):
         assert '"title": "You can\'t handle the truth!"' in rv.data
 
         # Check version data is stored correctly
-        assert '"v001": 12' in rv.data
+        assert '"0000-0000-0123456789ab": 12' in rv.data
         assert '"last_seen": "20141110_0500"' in rv.data
         assert '"first_seen": "20141110_0400"' in rv.data
         assert (
-            '"count": 5, "version": "v001", "hour": "20141110_0400"' in rv.data
-            )
+            '"count": 5, "version": "0000-0000-0123456789ab", '
+            '"hour": "20141110_0400"' in rv.data)
         assert (
-            '"count": 7, "version": "v001", "hour": "20141110_0500"' in rv.data
-            )
+            '"count": 7, "version": "0000-0000-0123456789ab", '
+            '"hour": "20141110_0500"' in rv.data)
+
+        # Now we somehow get through a perfect monitoring session for a new
+        # version even though there is this intermittent bug
+        monitor_data = {
+            'logs': [],
+            'minute': 0,
+            'version': '0000-1111-0123456789ab'
+        }
+        rv = self.app.post('/monitor',
+                           data=json.dumps(monitor_data),
+                           headers={"Content-type": "application/json"})
+        assert rv.status_code == 200
+
+        # Now we see the same error during monitoring of a new version
+        monitor_data = {
+            'logs': [
+                # This is the same error from before, but it is only happening
+                # once so no need to panic
+                {"status": 500, "level": 4, "resource": "/wut",
+                 "ip": "1.1.1.1", "route": "/wut", "module_id": "default",
+                 "message": "You can't handle the truth!"},
+            ],
+            'minute': 0,
+            'version': '0000-2222-0123456789ab'
+        }
+        rv = self.app.post('/monitor',
+                           data=json.dumps(monitor_data),
+                           headers={"Content-type": "application/json"})
+        assert rv.status_code == 200
+
+        # Now the monitor results should show some new errors
+        rv = self.app.get(
+            '/errors/0000-2222-0123456789ab/monitor/0?verify_versions='
+            '0000-0000-0123456789ab,0000-1111-0123456789ab')
+        ret = json.loads(rv.data)
+        assert 'errors' in ret
+        assert len(ret['errors']) == 0
 
 
 if __name__ == '__main__':

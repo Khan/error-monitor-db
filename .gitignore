@@ -55,3 +55,6 @@ target/
 
 .vagrant
 .idea
+bigquery_credentials.dat
+client_secrets.json
+secrets.py
