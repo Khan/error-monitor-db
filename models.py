@@ -520,7 +520,8 @@ def get_monitoring_errors(version, minute):
     """
     keys = r.zrevrange("ver:MON_%s:errors_by_minute:%d" % (version, minute),
             0, 1000, withscores=True)
-    return [(_get_cached_error_def(k), count) for k, count in keys]
+    errors = [(_get_cached_error_def(k), count) for k, count in keys]
+    return [e for e in errors if e[0] is not None]
 
 
 def lookup_monitoring_error(version, minute, error_key):
