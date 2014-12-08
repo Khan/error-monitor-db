@@ -24,6 +24,7 @@ import datetime
 import httplib2
 import logging
 from optparse import OptionParser
+import os
 import pprint
 import re
 
@@ -46,10 +47,12 @@ PROJECT_NUMBER = '124072386181'
 class BigQuery(object):
     def __init__(self):
         """Initialize the BigQuery client, making sure we are authorized."""
+        dir = os.path.dirname(os.path.realpath(__file__))
         flow = oauth2client.client.flow_from_clientsecrets(
-            'client_secrets.json',
+            '%s/client_secrets.json' % dir,
             scope='https://www.googleapis.com/auth/bigquery')
-        storage = oauth2client.file.Storage('bigquery_credentials.dat')
+        storage = oauth2client.file.Storage(
+            '%s/bigquery_credentials.dat' % dir)
         credentials = storage.get()
 
         if credentials is None or credentials.invalid:
