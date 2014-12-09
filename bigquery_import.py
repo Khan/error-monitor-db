@@ -22,11 +22,13 @@ reasons:
 """
 import datetime
 import httplib2
+import json
 import logging
 from optparse import OptionParser
 import os
 import pprint
 import re
+import sys
 
 import apiclient.discovery
 import apiclient.errors
@@ -42,6 +44,19 @@ import models
 # The AppEngine project number for 'khan' (NOT 'khan-academy' for historical
 # reasons) where we store our BigQuery tables.
 PROJECT_NUMBER = '124072386181'
+
+
+class TableNotFoundError(Exception):
+    pass
+
+
+class UnknownBigQueryError(Exception):
+    def __init__(self, error_json):
+        self.error = error_json
+
+
+class MissingBigQueryCredentialsError(Exception):
+    pass
 
 
 class BigQuery(object):
@@ -95,14 +110,18 @@ class BigQuery(object):
                                                  body=query_data).execute()
 
         except apiclient.errors.HttpError as err:
-            print 'Error:', pprint.pprint(err.content)
-            return None
+            err_json = json.loads(err.content)
+            # Traverse the unnecessarily complex JSON to check if the error is
+            # simply that the table was not found.
+            if ((err_json.get("error", {}).get("errors", []) or [{}])[0]
+                    .get("reason", "") == "notFound"):
+                raise TableNotFoundError()
+
+            raise UnknownBigQueryError(err_json)
 
         except oauth2client.client.AccessTokenRefreshError:
-            print ("Credentials have been revoked or expired, please re-run"
-                    "the application to re-authorize")
-            return None
-            
+            raise MissingBigQueryCredentialsError()
+
         return query_response['rows']
 
     def logs_from_bigquery(self, log_hour):
@@ -113,10 +132,10 @@ class BigQuery(object):
 
         Returns a set of all the unique error keys seen as well as a set of
         the unique *new* error keys (errors that were not seen before this
-        hour in the logs), or None/None in case of error.
+        hour in the logs). In case of an error, raises one of the exceptions
+        at the top of the file.
         """
         if models.check_log_data_received(log_hour):
-            print "Already fetched logs for %s" % log_hour
             return set(), set()
 
         lines = 0
@@ -128,8 +147,6 @@ class BigQuery(object):
              'app_logs.message, elog_url_route, module_id '
              'FROM [logs_hourly.requestlogs_%s] WHERE '
              'app_logs.level >= 3') % log_hour)
-        if records == None:
-            return None, None
 
         for record in records:
             (
@@ -177,10 +194,25 @@ if __name__ == "__main__":
     bq = BigQuery()
     for hour in xrange(0, 24):
         log_hour = "%s_%02d" % (options.date_str, hour)
-        error_keys, new_errors = bq.logs_from_bigquery(log_hour)
-        if error_keys is None:
-            print "Could not fetch logs."
+
+        try:
+            error_keys, new_errors = bq.logs_from_bigquery(log_hour)
+
+        except TableNotFoundError:
+            print "BigQuery table for %s is not available yet." % log_hour
             break
+
+        except UnknownBigQueryError, e:
+            print "BigQuery error:"
+            pprint.pprint(e.error)
+            # Return an error code so that cron will broadcast the message
+            sys.exit(1)
+
+        except MissingBigQueryCredentialsError:
+            print ("Credentials have been revoked or expired, please re-run"
+                   "the application to re-authorize")
+            # Return an error code so that cron will broadcast the message
+            sys.exit(1)
 
         if new_errors and options.hipchat:
             for error_key in new_errors:
