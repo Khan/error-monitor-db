@@ -127,6 +127,9 @@ class BigQuery(object):
     def logs_from_bigquery(self, log_hour):
         """Retrieve logs for the specified hour from BigQuery.
 
+        'log_hour' is the date portion of the request log dataset name, in the
+        format YYYYMMDD_HH, in UTC time.
+
         If the logs have already been retrieved and the errors are in Redis,
         don't re-fetch the logs.
 
@@ -184,9 +187,9 @@ if __name__ == "__main__":
     # as we like.
     parser = OptionParser()
     parser.add_option("-d", "--date", dest="date_str",
-                      default=datetime.datetime.now().strftime("%Y%m%d"),
-                      help="Date to import logs for, in format YYYYMMDD."
-                            "If omitted, use today's date.")
+                      default=datetime.datetime.utcnow().strftime("%Y%m%d"),
+                      help="Date (in UTC) to import logs for, in format "
+                            "YYYYMMDD. If omitted, use today's date.")
     parser.add_option("-H", "--hipchat", dest="hipchat",
                       help="Hipchat room to notify of new errors.")
     (options, args) = parser.parse_args()
