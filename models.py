@@ -183,6 +183,11 @@ def _get_cached_error_def(error_key):
         return None
 
     err = json.loads(err)
+
+    # Add a readable version of "level" to the error def before it goes in the
+    # cache
+    err["level_readable"] = ERROR_LEVELS[int(err["level"])]
+
     _error_def_cache[error_key] = err
     for id in _ERROR_ID_KEYS:
         _error_id_cache[id][err[id]] = error_key
@@ -357,6 +362,24 @@ def _parse_message(message, status, level):
     return (error_def, stack, stack_key)
 
 
+def get_error_keys():
+    """Scans Redis for a list of all unexpired error keys."""
+    cursor = 0
+    error_keys = set()  # The same error key can be returned twice
+    while True:
+        cursor, keys = r.scan(cursor=cursor, match="error:*", count=1000)
+        error_keys.update(k.split(":")[1] for k in keys)
+        if cursor == 0:
+            break
+
+    return error_keys
+
+
+def get_error_keys_by_version(version):
+    """Gets the list of all errors seen on a single GAE version."""
+    return r.zrevrange("ver:%s:errors" % version, 0, 1000, withscores=False)
+
+
 def get_error_summary_info(error_key):
     """Retrieve error summary information from Redis.
     
@@ -386,7 +409,8 @@ def get_error_summary_info(error_key):
     versions = r.zrevrange("%s:versions" % error_key, 0, -1, withscores=True)
 
     by_hour_and_version = []
-    for version, _ in versions:
+    total_count = 0
+    for version, version_count in versions:
         hours_seen = r.hgetall("ver:%s:error:%s:hours_seen" % (
             version, error_key))
         if hours_seen:
@@ -396,16 +420,80 @@ def get_error_summary_info(error_key):
                     "version": version,
                     "count": count
                 })
-    
+
+        total_count += version_count
+
     error_info = {
         "error_def": error_def,
         "versions": dict(versions),
-        "first_seen": r.get("first_seen:%s" % error_key),
-        "last_seen": r.get("last_seen:%s" % error_key),
-        "by_hour_and_version": by_hour_and_version
+        "first_seen": r.get("first_seen:%s" % error_key) or None,
+        "last_seen": r.get("last_seen:%s" % error_key) or None,
+        "by_hour_and_version": by_hour_and_version,
+        "count": total_count
     }
 
     return error_info
+
+
+def get_error_extended_information(version, error_key):
+    """Return routes & stack traces for this error with their hitcounts.
+
+    The data returned pertains only to the GAE version specified.
+
+    This is fairly expensive in terms of Redis calls but we assume that only
+    one error is being viewed at a time.
+
+    The return format is a list of routes, as all the other information is
+    aggregated by route. Each route looks like:
+
+        {
+            "route": <route identifier of the request handler>,
+            "count": <occurrence count for this route>,
+            "urls": <list of (URL, count) tuples for the URLs seen on this
+                route, sorted by frequency>,
+            "stacks": [
+                {
+                    "stack": [
+                        {
+                            "filename": <error filename>,
+                            "lineno": <line number in filename>,
+                            "function": <function that triggered error>
+                        },
+                        ...
+                    ],
+                    "count": <occurrence count for this stack trace>
+                },
+                ...
+            ]
+        }
+    """
+    ret = []
+    key_prefix = "ver:%s:error:%s" % (version, error_key)
+    routes = r.zrevrange("%s:routes" % key_prefix, 0, -1, withscores=True)
+    for route, count in routes:
+        # Get stack trace information for the route
+        stack_counts = r.zrevrange(
+            "%s:stacks:%s:counts" % (key_prefix, route),
+            0, -1, withscores=True)
+        stacks = []
+
+        for stack_key, stack_count in stack_counts:
+            # Return the content of the stack trace, decoded from JSON
+            stacks.append({
+                "count": stack_count,
+                "stack": json.loads(
+                    r.hget("%s:stacks:msgs" % key_prefix, stack_key))
+            })
+
+        ret.append({
+            "route": route,
+            "count": count,
+            "urls": r.zrevrange(
+                "%s:uris:%s" % (key_prefix, route), 0, -1, withscores=True),
+            "stacks": stacks
+        })
+
+    return ret
 
 
 ####

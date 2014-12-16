@@ -15,6 +15,11 @@ class ErrorMonitorTest(unittest.TestCase):
         self.old_r = models.r
         models.r = fakeredis.FakeStrictRedis()
 
+        # Simple implementation of 'scan', since it's missing from
+        # `FakeStrictRedis`
+        models.r.scan = lambda cursor, match, count: (
+                (0, models.r.keys(match)))
+
         # Get a test app we can make requests against
         self.app = server.app.test_client()
 
@@ -221,6 +226,13 @@ class ErrorMonitorTest(unittest.TestCase):
         assert '"level": 4' in rv.data
         assert '"title": "You can\'t handle the truth!"' in rv.data
 
+        parsed_data = json.loads(rv.data)
+        assert "routes" in parsed_data
+        assert "count" in parsed_data["routes"][0]
+        assert parsed_data["routes"][0]["count"] == 12
+        assert "route" in parsed_data["routes"][0]
+        assert parsed_data["routes"][0]["route"] == "/omg"
+
         # Check version data is stored correctly
         assert '"0000-0000-0123456789ab": 12' in rv.data
         assert '"last_seen": "20141110_0500"' in rv.data
@@ -268,6 +280,57 @@ class ErrorMonitorTest(unittest.TestCase):
         ret = json.loads(rv.data)
         assert 'errors' in ret
         assert len(ret['errors']) == 0
+
+    def test_fetch_errors(self):
+        # Add an error to the database
+        monitor_data = {
+            'logs': [
+                # A unique error!
+                {"status": 500, "level": 4, "resource": "/test",
+                    "ip": "1.1.1.1", "route": "/test", "module_id": "default",
+                    "message": "Error while parsing directive 1"}
+            ],
+            'minute': 0,
+            'version': 'vx001'
+        }
+        rv = self.app.post('/monitor',
+                data=json.dumps(monitor_data),
+                headers={"Content-type": "application/json"})
+        assert rv.status_code == 200
+
+        # Add a new error to the database for a new version
+        monitor_data = {
+            'logs': [
+                # A unique error!
+                {"status": 500, "level": 4, "resource": "/leia",
+                    "ip": "1.1.1.1", "route": "/leia", "module_id": "default",
+                    "message": "Help me, Obi Wan Kenobi. You're my only hope"}
+            ],
+            'minute': 0,
+            'version': 'vx002'
+        }
+        rv = self.app.post('/monitor',
+                data=json.dumps(monitor_data),
+                headers={"Content-type": "application/json"})
+        assert rv.status_code == 200
+
+        # Check that "recent errors" includes both errors
+        rv = self.app.get('/recent_errors')
+        ret = json.loads(rv.data)
+        assert "errors" in ret
+        assert len(ret["errors"]) == 2
+
+        # Check that requesting errors from one version filters correctly
+        rv = self.app.get('/version_errors/MON_vx001')
+        ret = json.loads(rv.data)
+        assert "errors" in ret
+        assert len(ret["errors"]) == 1
+
+        # Errors from monitoring don't "leak" to the non-monitoring version
+        rv = self.app.get('/version_errors/vx001')
+        ret = json.loads(rv.data)
+        assert "errors" in ret
+        assert len(ret["errors"]) == 0
 
 
 if __name__ == '__main__':

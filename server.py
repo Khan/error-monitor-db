@@ -202,15 +202,57 @@ def monitor_results(version_id, minute):
     })
 
 
+@app.route("/recent_errors", methods=["get"])
+def view_recent_errors():
+    """Summary information for all errors seen in the past week.
+
+    See `get_error_summary_info` for more information.
+    """
+    errors = sorted(
+        [models.get_error_summary_info(error_key)
+         for error_key in models.get_error_keys()],
+        key=lambda error: error["count"],
+        reverse=True)
+
+    return json.dumps({
+        "errors": errors
+    })
+
+
+@app.route("/version_errors/<version>", methods=["get"])
+def view_version_errors(version):
+    """Summary information for all errors seen in the specified version.
+
+    See `get_error_summary_info` for more information.
+    """
+    errors = sorted(
+        filter(
+          lambda x: x is not None,
+          [models.get_error_summary_info(error_key)
+           for error_key in models.get_error_keys_by_version(version)]),
+        key=lambda error: error["count"],
+        reverse=True)
+
+    return json.dumps({
+        "errors": errors
+    })
+
+
 @app.route("/error/<error_key>", methods=["get"])
 def view_error(error_key):
     """Summary information for a single error.
     
-    See `get_error_summary_info` for more information.
+    See `get_error_summary_info` and `get_error_extended_information` for more
+    information. Extended error information is only retrieved for the latest
+    GAE version this error occurred on.
     """
     info = models.get_error_summary_info(error_key)
     if not info:
         return "Error not found", 404
+
+    # Get latest version and return route/stack information for that version
+    version = sorted(info["versions"].keys())[-1]
+    info["routes"] = models.get_error_extended_information(version, error_key)
 
     return json.dumps(info)
 
