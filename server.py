@@ -10,7 +10,6 @@ import scipy.stats
 import models
 
 app = flask.Flask("Khan Academy Error Monitor")
-app.debug = True  # TODO(tom) STOPSHIP Take out before deploying to production
 
 r = redis.StrictRedis(host='localhost', port=6379, db=0)
 
@@ -259,7 +258,12 @@ def view_error(error_key):
 
 @app.route('/ping')
 def ping():
-    """Simple handler used to check if the server is running."""
+    """Simple handler used to check if the server is running.
+    
+    This will return an error if we cannot connect to Redis.
+    """
+    if not models.can_connect():
+        return "ERROR Cannot connect to Redis instance.", 500
     return flask.Response('pong', mimetype='text/plain')
 
 

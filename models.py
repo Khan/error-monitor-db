@@ -157,6 +157,14 @@ _ERROR_ID_KEYS = ["id0", "id1", "id2", "id3"]
 r = redis.StrictRedis(host='localhost', port=6379, db=0)
 
 
+def can_connect():
+    """Test if we can actually connect to Redis."""
+    try:
+        return r.ping()
+    except redis.exceptions.ConnectionError:
+        return False
+
+
 ####
 ## Caches for error data from Redis.
 ####
