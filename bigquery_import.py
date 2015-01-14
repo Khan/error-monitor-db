@@ -222,13 +222,14 @@ if __name__ == "__main__":
                 info = models.get_error_summary_info(error_key)
                 alert = alertlib.Alert(
                     'New error found in app logs at hour %s: '
-                    '%s (%s) %s' % (
+                    '%s (%s) %s\nFor details see https://www.khanacademy.org/'
+                    'devadmin/errors/%s' % (
                         log_hour,
                         models.ERROR_LEVELS[int(info["error_def"]["level"])],
                         info["error_def"]["status"],
-                        info["error_def"]["title"]
-                    ), severity=logging.ERROR)
-                alert.send_to_hipchat(options.hipchat)
+                        info["error_def"]["title"],
+                        error_key
+                    ), severity=logging.ERROR).send_to_hipchat(options.hipchat)
 
     print "Done fetching logs."
 
