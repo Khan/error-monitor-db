@@ -213,6 +213,11 @@ def _find_error_by_def(error_def):
     """Find an existing error by the identifying information in error_def.
 
     If successful, return the error key. Otherwise return None.
+
+    Note that just because we have an error key doesn't mean that the error
+    information is still in Redis - since we cannot expire individual entries
+    from the errordef hashtables, we will still return an error key even if
+    all other information about it has expired.
     """
     # Try to match by hash
     if (error_def['key'] in _error_def_cache or
@@ -254,8 +259,12 @@ def _find_or_create_error(error_def, expiry):
 
     # Attempt to match an existing error
     error_key = _find_error_by_def(error_def)
-    if not error_key:
-        error_key = error_def['key']
+    if not error_key or not r.get("error:%s" % error_key):
+        # If we do not have an error key, then this is a brand-new error.
+        # Otherwise, we are dealing with an old error that expired from Redis
+        # but has recurred so we must recreate it.
+        if not error_key:
+            error_key = error_def['key']
 
         # Store the error def information as one key
         r.set("error:%s" % error_key, json.dumps(error_def))

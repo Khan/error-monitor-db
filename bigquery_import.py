@@ -220,6 +220,9 @@ if __name__ == "__main__":
         if new_errors and options.hipchat:
             for error_key in new_errors:
                 info = models.get_error_summary_info(error_key)
+                if info is None:
+                    raise Exception("Could not find error key %s in redis" %
+                            error_key)
                 alert = alertlib.Alert(
                     'New error found in app logs at hour %s: '
                     '%s (%s) %s\nFor details see https://www.khanacademy.org/'
