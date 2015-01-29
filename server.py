@@ -14,6 +14,17 @@ app = flask.Flask("Khan Academy Error Monitor")
 r = redis.StrictRedis(host='localhost', port=6379, db=0)
 
 
+def _version_sort_key(version):
+    """HACK: sort versions so that Dec '14 sorts before Jan '15.
+
+    This is necessary because we don't yet store the year in the version name
+    so 1231-* needs to be hard-coded to sort before 0101-*.
+    TODO(tom): Take this out once we store the 2-digit year in the version
+    name.
+    """
+    return '14' + version if version.startswith('12') else '15' + version
+
+
 def _count_is_elevated_probability(historical_counts, recent_count):
     """Give the probability recent_count is elevated over the norm.
 
@@ -250,7 +261,7 @@ def view_error(error_key):
         return "Error not found", 404
 
     # Get latest version and return route/stack information for that version
-    version = sorted(info["versions"].keys())[-1]
+    version = sorted(info["versions"].keys(), key=_version_sort_key)[-1]
     info["routes"] = models.get_error_extended_information(version, error_key)
 
     return json.dumps(info)
