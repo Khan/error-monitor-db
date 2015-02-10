@@ -260,11 +260,14 @@ def _find_or_create_error(error_def, expiry):
     # Attempt to match an existing error
     error_key = _find_error_by_def(error_def)
     if not error_key or not r.get("error:%s" % error_key):
-        # If we do not have an error key, then this is a brand-new error.
-        # Otherwise, we are dealing with an old error that expired from Redis
-        # but has recurred so we must recreate it.
         if not error_key:
+            # If we do not have an error key, then this is a brand-new error.
             error_key = error_def['key']
+        else:
+            # If we do have a key, we are dealing with an old error that
+            # matches this one but has expired from Redis but has recurred so
+            # we must recreate it, although the key may have changed
+            error_def['key'] = error_key
 
         # Store the error def information as one key
         r.set("error:%s" % error_key, json.dumps(error_def))
