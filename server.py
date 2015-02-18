@@ -3,6 +3,7 @@ import json
 
 import flask
 import logging
+import logging.handlers
 import numpy
 import redis
 import scipy.stats
@@ -276,6 +277,14 @@ def ping():
     if not models.can_connect():
         return "ERROR Cannot connect to Redis instance.", 500
     return flask.Response('pong', mimetype='text/plain')
+
+
+if not app.debug:
+    file_handler = logging.handlers.RotatingFileHandler(
+        '/home/ubuntu/logs/error-monitor-db-app.log',
+        maxBytes=1024 * 1024, backupCount=5)
+    file_handler.setLevel(logging.WARNING)
+    app.logger.addHandler(file_handler)
 
 
 if __name__ == "__main__":
