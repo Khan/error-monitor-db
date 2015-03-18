@@ -66,9 +66,12 @@ class ErrorMonitorTest(unittest.TestCase):
                     "message": "This URI is blacklisted."},
 
                 # A second unique error
+                # (Only the first word matches the previous error, but we need
+                # 3 to consider them the same)
                 {"status": 500, "level": 4, "resource": "/leia",
                     "ip": "1.1.1.1", "route": "/leia", "module_id": "default",
-                    "message": "Help me, Obi Wan Kenobi. You're my only hope"},
+                    "message": "Error Help me, Obi Wan Kenobi. You're my only "
+                        "hope"},
             ],
             'minute': 0,
             'version': 'v001'
@@ -183,7 +186,7 @@ class ErrorMonitorTest(unittest.TestCase):
         # Record an error a few different times over a few different hours
         query_response = [{
             "f": [
-                {"v": "0000-0000-0123456789ab"},
+                {"v": "000000-0000-0123456789ab"},
                 {"v": "2.2.2.2"},
                 {"v": "/omg"},
                 {"v": 500},
@@ -201,7 +204,7 @@ class ErrorMonitorTest(unittest.TestCase):
 
         query_response = [{
             "f": [
-                {"v": "0000-0000-0123456789ab"},
+                {"v": "000000-0000-0123456789ab"},
                 {"v": "2.2.2.2"},
                 {"v": "/omg"},
                 {"v": 500},
@@ -234,14 +237,14 @@ class ErrorMonitorTest(unittest.TestCase):
         assert parsed_data["routes"][0]["route"] == "/omg"
 
         # Check version data is stored correctly
-        assert '"0000-0000-0123456789ab": 12' in rv.data
+        assert '"000000-0000-0123456789ab": 12' in rv.data
         assert '"last_seen": "20141110_0500"' in rv.data
         assert '"first_seen": "20141110_0400"' in rv.data
         assert (
-            '"count": 5, "version": "0000-0000-0123456789ab", '
+            '"count": 5, "version": "000000-0000-0123456789ab", '
             '"hour": "20141110_0400"' in rv.data)
         assert (
-            '"count": 7, "version": "0000-0000-0123456789ab", '
+            '"count": 7, "version": "000000-0000-0123456789ab", '
             '"hour": "20141110_0500"' in rv.data)
 
         # Now we somehow get through a perfect monitoring session for a new
@@ -249,7 +252,7 @@ class ErrorMonitorTest(unittest.TestCase):
         monitor_data = {
             'logs': [],
             'minute': 0,
-            'version': '0000-1111-0123456789ab'
+            'version': '000000-1111-0123456789ab'
         }
         rv = self.app.post('/monitor',
                            data=json.dumps(monitor_data),
@@ -266,7 +269,7 @@ class ErrorMonitorTest(unittest.TestCase):
                  "message": "You can't handle the truth!"},
             ],
             'minute': 0,
-            'version': '0000-2222-0123456789ab'
+            'version': '000000-2222-0123456789ab'
         }
         rv = self.app.post('/monitor',
                            data=json.dumps(monitor_data),
@@ -275,8 +278,8 @@ class ErrorMonitorTest(unittest.TestCase):
 
         # Now the monitor results should show some new errors
         rv = self.app.get(
-            '/errors/0000-2222-0123456789ab/monitor/0?verify_versions='
-            '0000-0000-0123456789ab,0000-1111-0123456789ab')
+            '/errors/000000-2222-0123456789ab/monitor/0?verify_versions='
+            '000000-0000-0123456789ab,000000-1111-0123456789ab')
         ret = json.loads(rv.data)
         assert 'errors' in ret
         assert len(ret['errors']) == 0

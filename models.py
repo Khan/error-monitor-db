@@ -328,7 +328,7 @@ def _parse_message(message, status, level):
 
     # The first 3 words of the title
     error_def['id1'] = (
-            id_prefix + " ".join(error_def['id0'].split(" ")[:3]))
+            id_prefix + " ".join(error_def['id0'].split(" ")[2:5]))
 
     # The last 3 words of the title
     error_def['id2'] = (
