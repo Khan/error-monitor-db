@@ -29,6 +29,7 @@ import os
 import pprint
 import re
 import sys
+import time
 
 import apiclient.discovery
 import apiclient.errors
@@ -100,29 +101,44 @@ class BigQuery(object):
                 }
             ]
         """
-        try:
-            # Create a query statement and query request object
-            query_data = {'query': sql}
-            query_request = self.bigquery_service.jobs()
+        # Try a few times because occasionally BigQuery returns early without
+        # any response data
+        for attempt in range(3):
+            try:
+                # Create a query statement and query request object
+                query_data = {'query': sql}
+                query_request = self.bigquery_service.jobs()
 
-            # Make a call to the BigQuery API
-            query_response = query_request.query(projectId=PROJECT_NUMBER,
-                                                 body=query_data).execute()
+                # Make a call to the BigQuery API
+                query_response = query_request.query(projectId=PROJECT_NUMBER,
+                                                     body=query_data).execute()
 
-        except apiclient.errors.HttpError as err:
-            err_json = json.loads(err.content)
-            # Traverse the unnecessarily complex JSON to check if the error is
-            # simply that the table was not found.
-            if ((err_json.get("error", {}).get("errors", []) or [{}])[0]
-                    .get("reason", "") == "notFound"):
-                raise TableNotFoundError()
+            except apiclient.errors.HttpError as err:
+                err_json = json.loads(err.content)
+                # Traverse the unnecessarily complex JSON to check if the error
+                # is simply that the table was not found.
+                if ((err_json.get("error", {}).get("errors", []) or [{}])[0]
+                        .get("reason", "") == "notFound"):
+                    raise TableNotFoundError()
 
-            raise UnknownBigQueryError(err_json)
+                raise UnknownBigQueryError(err_json)
 
-        except oauth2client.client.AccessTokenRefreshError:
-            raise MissingBigQueryCredentialsError()
+            except oauth2client.client.AccessTokenRefreshError:
+                raise MissingBigQueryCredentialsError()
 
-        return query_response['rows']
+            if query_response.get('jobComplete', True) is False:
+                # This happens occasionally with no additional information, so
+                # for now just wait a bit and try again
+                time.sleep(60)
+                continue
+
+            if 'rows' not in query_response:
+                # Some other error happened that we didn't anticipate, so log
+                # the response which hopefully includes some kind of error
+                # message
+                raise UnknownBigQueryError(query_response)
+
+            return query_response['rows']
 
     def logs_from_bigquery(self, log_hour):
         """Retrieve logs for the specified hour from BigQuery.
@@ -222,7 +238,7 @@ if __name__ == "__main__":
                 info = models.get_error_summary_info(error_key)
                 if info is None:
                     raise Exception("Could not find error key %s in redis" %
-                            error_key)
+                                    error_key)
                 alert = alertlib.Alert(
                     'New error found in app logs at hour %s: '
                     '%s (%s) %s\nFor details see https://www.khanacademy.org/'
@@ -235,5 +251,4 @@ if __name__ == "__main__":
                     ), severity=logging.ERROR).send_to_hipchat(options.hipchat)
 
     print "Done fetching logs."
-
 
