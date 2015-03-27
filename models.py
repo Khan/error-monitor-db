@@ -312,8 +312,13 @@ def _parse_message(message, status, level):
     error_def = {}
     msg_lines = message.split("\n")
 
-    # The first line of the message is the visible error message
+    # The first line of the message is *usually* the visible error message
     error_def['title'] = msg_lines[0].encode('utf-8')
+
+    if not error_def['title']:
+        # For some errors, the first line is empty and the interesting message
+        # is only found at the end :P
+        error_def['title'] = msg_lines[-1].encode('utf-8')
 
     # Copy over status & level
     error_def['status'] = status
