@@ -1,4 +1,5 @@
 """A server that stores & retrieves error information from app logs."""
+import argparse
 import json
 
 import flask
@@ -122,7 +123,7 @@ def monitor():
 @app.route("/errors/<version_id>/monitor/<int:minute>", methods=["get"])
 def monitor_results(version_id, minute):
     """Fetch monitoring results for one minute of monitoring.
-    
+
     This handler assumes that errors logs for the specified minute have been
     posted to the /monitor handler previously. The error counts for that
     timeframe are compared with the same timeframe in the specified prior
@@ -252,7 +253,7 @@ def view_version_errors(version):
 @app.route("/error/<error_key>", methods=["get"])
 def view_error(error_key):
     """Summary information for a single error.
-    
+
     See `get_error_summary_info` and `get_error_extended_information` for more
     information. Extended error information is only retrieved for the latest
     GAE version this error occurred on.
@@ -271,7 +272,7 @@ def view_error(error_key):
 @app.route('/ping')
 def ping():
     """Simple handler used to check if the server is running.
-    
+
     This will return an error if we cannot connect to Redis.
     """
     if not models.can_connect():
@@ -288,5 +289,16 @@ if not app.debug:
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='Serve the error-monitor-db.')
+
+    parser.add_argument('--port', type=int, default=9340,
+        help='HTTP listen port.')
+
+    parser.add_argument('--debug', action='store_true', default=False,
+        help='Enable debug mode.')
+
+    args = parser.parse_args()
+
     # Start the server running
-    app.run(host="0.0.0.0", port=9340)
+    app.debug = args.debug
+    app.run(host="0.0.0.0", port=args.port)

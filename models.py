@@ -117,7 +117,7 @@ We write to the following Redis keys:
     ver:<version>:error:<key>:hours_seen - A dictionary of each log hour when
         this error appeared in this version's logs and the occurrence count
         for that hour
-    
+
 
 """
 
@@ -253,7 +253,7 @@ def _find_or_create_error(error_def, expiry):
     'expiry' is the timeout in seconds until all these keys expire (or -1
     for no expiration). Existing errors will have their expiration lease
     renewed.
-    
+
     Returns the identifier key of the existing or new error.
     """
 
@@ -407,7 +407,7 @@ def get_error_keys_by_version(version):
 
 def get_error_summary_info(error_key):
     """Retrieve error summary information from Redis.
-    
+
     The format of the summary information is:
 
         "error_def" - See _parse_message for the error def format
@@ -446,7 +446,13 @@ def get_error_summary_info(error_key):
                     "count": count
                 })
 
-        total_count += version_count
+                total_count += int(count)
+        else:
+            # The ver:<version_id> keys are properly expired, but we do not
+            # have a redis way of expiring the members of the :versions sorted
+            # set, so we do it manually here by removing the :versions keys
+            # that which do not have a corresponding ver:<version_id> key.
+            r.zrem("%s:versions" % error_key, version)
 
     error_info = {
         "error_def": error_def,
@@ -609,6 +615,8 @@ def _update_error_details(version, status, level, resource, ip, route,
     r.expire("ver:%s:errors" % version, KEY_EXPIRY_SECONDS)
 
     # Record a hit for the version
+    # NOTE: The keys of this sorted set are manually expired out within
+    # get_error_summary_info()
     r.zincrby("%s:versions" % error_key, version)
     r.expire("%s:versions" % error_key, KEY_EXPIRY_SECONDS)
 
