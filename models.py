@@ -120,7 +120,7 @@ We write to the following Redis keys:
 
 
 """
-
+import datetime
 import json
 import md5
 import re
@@ -137,6 +137,14 @@ URI_BLACKLIST = [
 
 # Time delay until we expire keys (one week)
 KEY_EXPIRY_SECONDS = 60 * 60 * 24 * 7
+
+
+def _get_log_hour_int_expiry():
+    """Returns a YYYYMMDDHH int representing the expiration time."""
+    expiry = (datetime.datetime.utcnow()
+        - datetime.timedelta(seconds=KEY_EXPIRY_SECONDS))
+    return int(expiry.strftime('%Y%m%d%H'))
+
 
 # webapp appends a cache-busting query param e.g. _=131231 for API calls
 # made from the JS code. We want to ignore them because a different cache
@@ -454,10 +462,15 @@ def get_error_summary_info(error_key):
             # that which do not have a corresponding ver:<version_id> key.
             r.zrem("%s:versions" % error_key, version)
 
+    # TODO(mattfaus): Remove after 5/5/2015 when all keys are migrated
+    if r.type("first_seen:%s" % error_key) != "zset":
+        r.delete("first_seen:%s" % error_key)
+
     error_info = {
         "error_def": error_def,
         "versions": dict(versions),
-        "first_seen": r.get("first_seen:%s" % error_key) or None,
+        "first_seen": r.zrange(
+            "first_seen:%s" % error_key, start=0, end=0) or None,
         "last_seen": r.get("last_seen:%s" % error_key) or None,
         "by_hour_and_version": by_hour_and_version,
         "count": total_count
@@ -738,17 +751,25 @@ def record_occurrence_from_logs(version, log_hour, status, level, resource, ip,
         r.expire("ver:%s:error:%s:hours_seen" % (version, error_key),
                 KEY_EXPIRY_SECONDS)
 
-        # Record the first and last time we've seen the error.
+        # TODO(mattfaus): Remove after 5/5/2015 when all keys are migrated
+        if r.type("first_seen:%s" % error_key) != "zset":
+            r.delete("first_seen:%s" % error_key)
 
-        # Since log_hour is a string, use max char in case the key is missing
-        if log_hour < (r.get("first_seen:%s" % error_key) or "\xff"):
-            r.set("first_seen:%s" % error_key, log_hour)
-            r.expire("first_seen:%s" % error_key, KEY_EXPIRY_SECONDS)
-            # This will be set incorrectly if we process logs in
-            # non-chronological order.
-            # Currently we only use this for alerting in HipChat so hopefully
-            # this won't be a huge issue.
+        # Manage the running list of first_seen. If the first first_seen falls
+        # out of the KEY_EXPIRY_SECONDS window, remove it.
+        first_seen = r.zrange("first_seen:%s" % error_key, start=0, end=0)
+        if not first_seen:
             is_new = True
+        else:
+            # Remove all of the expired entries
+            expiry_log_hour_int = _get_log_hour_int_expiry()
+            r.zremrangebyscore("first_seen:%s" % error_key,
+                0, expiry_log_hour_int)
+
+        # Always call add, since it will either overwrite or append
+        log_hour_int = int(log_hour.replace("_", ""))
+        r.zadd("first_seen:%s" % error_key, log_hour_int, log_hour)
+        r.expire("first_seen:%s" % error_key, KEY_EXPIRY_SECONDS)
 
         if log_hour > r.get("last_seen:%s" % error_key):
             r.set("last_seen:%s" % error_key, log_hour)
