@@ -466,11 +466,17 @@ def get_error_summary_info(error_key):
     if r.type("first_seen:%s" % error_key) != "zset":
         r.delete("first_seen:%s" % error_key)
 
+    # Pop the first element off the list
+    first_seen = r.zrange("first_seen:%s" % error_key, start=0, end=0)
+    if first_seen:
+        first_seen = first_seen[0]
+    else:
+        first_seen = None
+
     error_info = {
         "error_def": error_def,
         "versions": dict(versions),
-        "first_seen": r.zrange(
-            "first_seen:%s" % error_key, start=0, end=0) or None,
+        "first_seen": first_seen,
         "last_seen": r.get("last_seen:%s" % error_key) or None,
         "by_hour_and_version": by_hour_and_version,
         "count": total_count
