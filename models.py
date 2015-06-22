@@ -323,6 +323,12 @@ def _parse_message(message, status, level):
     # The first line of the message is *usually* the visible error message
     error_def['title'] = msg_lines[0].encode('utf-8')
 
+    # When a warning gets promoted to an error, we insert an indicator
+    # of that, which should be removed for id-ing purposes.
+    promotion_prefix = '[promoted from WARNING] '
+    if error_def['title'].startswith(promotion_prefix):
+        error_def['title'] = error_def['title'][len(promotion_prefix):]
+
     if not error_def['title']:
         # For some errors, the first line is empty and the interesting message
         # is only found at the end :P
