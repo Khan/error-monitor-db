@@ -355,13 +355,6 @@ def _parse_message(message, status, level):
 
     # Special-cases
     error_def['id3'] = None
-    if error_def['title'].startswith("{'report_url':"):
-        # TODO(tom) Not sure where this error (which is just a bit of JSON
-        # without context) is being emitted. The most likely data structure
-        # this could be is the serializable version of UserAssessment in
-        # assessment/models.py. Would be nice to track this down so we can
-        # remove the special-case.
-        error_def['id3'] = id_prefix + 'report_url'
 
     # Build a hash of the identifiers to serve as a single unique
     # identifier for the error
