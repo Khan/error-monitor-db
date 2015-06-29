@@ -28,13 +28,11 @@ from optparse import OptionParser
 import os
 import pprint
 import re
-import sys
 import time
 
 import apiclient.discovery
 import apiclient.errors
 
-import oauth2client.client
 import oauth2client.client
 import oauth2client.file
 import oauth2client.tools
@@ -195,6 +193,54 @@ class BigQuery(object):
         return error_keys, new_errors
 
 
+def send_alerts_for_errors(date_str, hipchat_room=None):
+    """If hipchat-room specified, log to hipchat as well as to logs."""
+
+    bq = BigQuery()
+    for hour in xrange(0, 24):
+        log_hour = "%s_%02d" % (date_str, hour)
+
+        try:
+            error_keys, new_errors = bq.logs_from_bigquery(log_hour)
+
+        except TableNotFoundError:
+            logging.warning("BigQuery table for %s is not available yet."
+                            % log_hour)
+            break
+
+        except UnknownBigQueryError, e:
+            logging.fatal("BigQuery error: %s" % pprint.pformat(e.error))
+
+        except MissingBigQueryCredentialsError:
+            logging.fatal("Credentials have been revoked or expired, "
+                          "please re-run the application manually to "
+                          "re-authorize")
+
+        if new_errors:
+            for error_key in new_errors:
+                info = models.get_error_summary_info(error_key)
+                if info is None:
+                    raise Exception("Could not find error key %s in redis" %
+                                    error_key)
+
+                alert = alertlib.Alert(
+                    'New error found in app logs at hour %s: %s (%s) %s\n'
+                    'For details see '
+                    'https://www.khanacademy.org/devadmin/errors/%s' % (
+                        log_hour,
+                        models.ERROR_LEVELS[int(info["error_def"]["level"])],
+                        info["error_def"]["status"],
+                        info["error_def"]["title"],
+                        error_key
+                    ), severity=logging.ERROR)
+
+                alert.send_to_logs()
+                if hipchat_room:
+                    alert.send_to_hipchat(hipchat_room)
+
+    print "Done fetching logs."
+
+
 if __name__ == "__main__":
     # This will be called from a cron job. It will try to fetch each hour's
     # worth of logs for a given day until it fails (because of error or
@@ -210,45 +256,4 @@ if __name__ == "__main__":
                       help="Hipchat room to notify of new errors.")
     (options, args) = parser.parse_args()
 
-    bq = BigQuery()
-    for hour in xrange(0, 24):
-        log_hour = "%s_%02d" % (options.date_str, hour)
-
-        try:
-            error_keys, new_errors = bq.logs_from_bigquery(log_hour)
-
-        except TableNotFoundError:
-            print "BigQuery table for %s is not available yet." % log_hour
-            break
-
-        except UnknownBigQueryError, e:
-            print "BigQuery error:"
-            pprint.pprint(e.error)
-            # Return an error code so that cron will broadcast the message
-            sys.exit(1)
-
-        except MissingBigQueryCredentialsError:
-            print ("Credentials have been revoked or expired, please re-run"
-                   "the application to re-authorize")
-            # Return an error code so that cron will broadcast the message
-            sys.exit(1)
-
-        if new_errors and options.hipchat:
-            for error_key in new_errors:
-                info = models.get_error_summary_info(error_key)
-                if info is None:
-                    raise Exception("Could not find error key %s in redis" %
-                                    error_key)
-                alert = alertlib.Alert(
-                    'New error found in app logs at hour %s: '
-                    '%s (%s) %s\nFor details see https://www.khanacademy.org/'
-                    'devadmin/errors/%s' % (
-                        log_hour,
-                        models.ERROR_LEVELS[int(info["error_def"]["level"])],
-                        info["error_def"]["status"],
-                        info["error_def"]["title"],
-                        error_key
-                    ), severity=logging.ERROR).send_to_hipchat(options.hipchat)
-
-    print "Done fetching logs."
-
+    send_alerts_for_errors(options.date_str, options.hipchat)
