@@ -756,10 +756,6 @@ def record_occurrence_from_logs(version, log_hour, status, level, resource, ip,
         r.expire("ver:%s:error:%s:hours_seen" % (version, error_key),
                 KEY_EXPIRY_SECONDS)
 
-        # TODO(mattfaus): Remove after 5/5/2015 when all keys are migrated
-        if r.type("first_seen:%s" % error_key) != "zset":
-            r.delete("first_seen:%s" % error_key)
-
         # Manage the running list of first_seen. If the first first_seen falls
         # out of the KEY_EXPIRY_SECONDS window, remove it.
         first_seen = r.zrange("first_seen:%s" % error_key, start=0, end=0)

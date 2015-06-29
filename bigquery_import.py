@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 """BigQuery-related routines for querying the AppEngine logs.
 
 We already export all the AppEngine server logs to BigQuery once an hour,
@@ -43,6 +45,38 @@ import models
 # The AppEngine project number for 'khan' (NOT 'khan-academy' for historical
 # reasons) where we store our BigQuery tables.
 PROJECT_NUMBER = '124072386181'
+
+
+# A list of error message to ignore (that is, to not alert about).
+# These are errors that are either:
+# a) beyond our control to fix (OOM errors); or
+# b) known-broken and we want to fix them one day but don't know how to
+#    fix them yet (problem out of order).
+# Instead of alerting about such errors as they occur, we alert once
+# a day with a summary of how often these errors are occurring.
+#
+# Each entry is either a string or a regexp.  A log-line matches if
+# the full logline text contains any of the below as a substring.
+_ALERT_BLACKLIST = [
+    # OOM's, caused by really big ndb queries maybe?
+    'Exceeded soft private memory limit',
+
+    # We see this a lot when trying to send UDP packets to graphite.
+    # cf. https://enterprise.google.com/supportcenter/managecases#Case/0016000000QWp9w/4095721
+    'ApplicationError: 4 Unknown error',
+
+    # One day we'll figure out what causes this!
+    'Problem out of order',
+]
+
+
+def _matches_blacklist(logline):
+    for b in _ALERT_BLACKLIST:
+        if isinstance(b, basestring) and b in logline:
+            return True
+        if hasattr(b, 'search') and b.search(logline):     # regexp
+            return True
+    return False
 
 
 class TableNotFoundError(Exception):
@@ -147,17 +181,21 @@ class BigQuery(object):
         If the logs have already been retrieved and the errors are in Redis,
         don't re-fetch the logs.
 
-        Returns a set of all the unique error keys seen as well as a set of
-        the unique *new* error keys (errors that were not seen before this
-        hour in the logs). In case of an error, raises one of the exceptions
+        Returns a map whose keys are all the unique error keys seen
+        this hour.  The value is a string indicating the 'status' of
+        the error, either "new" (not seen before this hour in the
+        logs), "continuing" (not new), or "blacklist" (matches
+        _ALERT_BLACKLSIT).
+
+        In case of an error, raises one of the exceptions
         at the top of the file.
         """
         if models.check_log_data_received(log_hour):
-            return set(), set()
+            return {}
+
+        retval = {}
 
         lines = 0
-        error_keys = set()
-        new_errors = set()
         print "Fetching hourly logs for %s" % log_hour
         records = self.run_query(
             ('SELECT version_id, ip, resource, status, app_logs.level, '
@@ -180,17 +218,28 @@ class BigQuery(object):
                 module_id, message)
 
             if error_key:
-                error_keys.add(error_key)
-
-                if is_new:
-                    new_errors.add(error_key)
+                # TODO(csilvers): what to do if retval[error_key] already
+                # exists with a different value?  This can happen if two
+                # different types of errors (accidentally) resolve to the
+                # same error-key.
+                if _matches_blacklist(message):
+                    retval[error_key] = 'blacklist'
+                elif is_new:
+                    retval[error_key] = 'new'
+                else:
+                    retval[error_key] = 'continuing'
 
             lines += 1
 
-        print "Processed %d lines and found %d errors (%d new)." % (
-            lines, len(error_keys), len(new_errors))
+        num_blacklist = sum(1 for x in retval.itervalues() if x == 'blacklist')
+        num_new = sum(1 for x in retval.itervalues() if x == 'new')
+        num_old = sum(1 for x in retval.itervalues() if x == 'continuing')
+
+        print ("Processed %d lines and found %d distinct errors: "
+               "%d blacklisted, %d new, and %d continuing"
+               % (lines, len(retval), num_blacklist, num_new, num_old))
         models.record_log_data_received(log_hour)
-        return error_keys, new_errors
+        return retval
 
 
 def send_alerts_for_errors(date_str, hipchat_room=None):
@@ -201,7 +250,7 @@ def send_alerts_for_errors(date_str, hipchat_room=None):
         log_hour = "%s_%02d" % (date_str, hour)
 
         try:
-            error_keys, new_errors = bq.logs_from_bigquery(log_hour)
+            error_key_dict = bq.logs_from_bigquery(log_hour)
 
         except TableNotFoundError:
             logging.warning("BigQuery table for %s is not available yet."
@@ -216,27 +265,28 @@ def send_alerts_for_errors(date_str, hipchat_room=None):
                           "please re-run the application manually to "
                           "re-authorize")
 
-        if new_errors:
-            for error_key in new_errors:
-                info = models.get_error_summary_info(error_key)
-                if info is None:
-                    raise Exception("Could not find error key %s in redis" %
-                                    error_key)
+        for (error_key, key_type) in error_key_dict.iteritems():
+            if key_type != 'new':      # only show errors new this hour
+                continue
+            info = models.get_error_summary_info(error_key)
+            if info is None:
+                raise Exception("Could not find error key %s in redis" %
+                                error_key)
 
-                alert = alertlib.Alert(
-                    'New error found in app logs at hour %s: %s (%s) %s\n'
-                    'For details see '
-                    'https://www.khanacademy.org/devadmin/errors/%s' % (
-                        log_hour,
-                        models.ERROR_LEVELS[int(info["error_def"]["level"])],
-                        info["error_def"]["status"],
-                        info["error_def"]["title"],
-                        error_key
-                    ), severity=logging.ERROR)
+            alert = alertlib.Alert(
+                'New error found in app logs at hour %s: %s (%s) %s\n'
+                'For details see '
+                'https://www.khanacademy.org/devadmin/errors/%s' % (
+                    log_hour,
+                    models.ERROR_LEVELS[int(info["error_def"]["level"])],
+                    info["error_def"]["status"],
+                    info["error_def"]["title"],
+                    error_key
+                ), severity=logging.ERROR)
 
-                alert.send_to_logs()
-                if hipchat_room:
-                    alert.send_to_hipchat(hipchat_room)
+            alert.send_to_logs()
+            if hipchat_room:
+                alert.send_to_hipchat(hipchat_room)
 
     print "Done fetching logs."
 
