@@ -253,8 +253,8 @@ def send_alerts_for_errors(date_str, hipchat_room=None):
             error_key_dict = bq.logs_from_bigquery(log_hour)
 
         except TableNotFoundError:
-            logging.warning("BigQuery table for %s is not available yet."
-                            % log_hour)
+            # Not really an error, so we won't emit it to stderr.
+            print "BigQuery table for %s is not available yet." % log_hour
             break
 
         except UnknownBigQueryError, e:
