@@ -293,7 +293,7 @@ def send_alerts_for_errors(date_str, hipchat_room=None):
 
         # To avoid spamming the hipchat room, show full information
         # about the most common N errors, and a brief link to others.
-        continuing_alerts.sort()
+        continuing_alerts.sort(reverse=True)
         N = 3
         for (today_occurrences, error_key, info) in continuing_alerts[:N]:
             alert_msg = (
