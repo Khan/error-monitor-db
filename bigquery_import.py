@@ -181,11 +181,10 @@ class BigQuery(object):
         If the logs have already been retrieved and the errors are in Redis,
         don't re-fetch the logs.
 
-        Returns a map whose keys are all the unique error keys seen
-        this hour.  The value is a string indicating the 'status' of
-        the error, either "new" (not seen before this hour in the
-        logs), "continuing" (not new), or "blacklist" (matches
-        _ALERT_BLACKLSIT).
+        Returns a map whose keys are "new" (not seen before this hour
+        in the logs), "continuing" (not new), or "blacklist" (matches
+        _ALERT_BLACKLSIT), and where each value is a set of error-keys
+        that falls into that category.
 
         In case of an error, raises one of the exceptions
         at the top of the file.
@@ -193,7 +192,7 @@ class BigQuery(object):
         if models.check_log_data_received(log_hour):
             return {}
 
-        retval = {}
+        retval = {'new': set(), 'continuing': set(), 'blacklist': set()}
 
         lines = 0
         print "Fetching hourly logs for %s" % log_hour
@@ -223,21 +222,22 @@ class BigQuery(object):
                 # different types of errors (accidentally) resolve to the
                 # same error-key.
                 if _matches_blacklist(message):
-                    retval[error_key] = 'blacklist'
+                    retval['blacklist'].add(error_key)
                 elif is_new:
-                    retval[error_key] = 'new'
+                    retval['new'].add(error_key)
                 else:
-                    retval[error_key] = 'continuing'
+                    retval['continuing'].add(error_key)
 
             lines += 1
 
-        num_blacklist = sum(1 for x in retval.itervalues() if x == 'blacklist')
-        num_new = sum(1 for x in retval.itervalues() if x == 'new')
-        num_old = sum(1 for x in retval.itervalues() if x == 'continuing')
+        num_blacklist = len(retval['blacklist'])
+        num_new = len(retval['new'])
+        num_old = len(retval['continuing'])
 
         print ("Processed %d lines and found %d distinct errors: "
                "%d blacklisted, %d new, and %d continuing"
-               % (lines, len(retval), num_blacklist, num_new, num_old))
+               % (lines, num_blacklist + num_new + num_old,
+                  num_blacklist, num_new, num_old))
         models.record_log_data_received(log_hour)
         return retval
 
@@ -265,28 +265,44 @@ def send_alerts_for_errors(date_str, hipchat_room=None):
                           "please re-run the application manually to "
                           "re-authorize")
 
-        for (error_key, key_type) in error_key_dict.iteritems():
-            if key_type != 'new':      # only show errors new this hour
-                continue
+        for error_key in error_key_dict['continuing']:
             info = models.get_error_summary_info(error_key)
             if info is None:
                 raise Exception("Could not find error key %s in redis" %
                                 error_key)
 
-            alert = alertlib.Alert(
-                'New error found in app logs at hour %s: %s (%s) %s\n'
+            # TODO(csilvers): say how often it occurred
+            alert_msg = (
+                'Continuing error found in app logs at hour %s: %s (%s) %s\n'
                 'For details see '
                 'https://www.khanacademy.org/devadmin/errors/%s' % (
                     log_hour,
                     models.ERROR_LEVELS[int(info["error_def"]["level"])],
                     info["error_def"]["status"],
                     info["error_def"]["title"],
-                    error_key
-                ), severity=logging.ERROR)
+                    error_key))
+            alert = alertlib.Alert(alert_msg, severity=logging.ERROR)
 
-            alert.send_to_logs()
             if hipchat_room:
                 alert.send_to_hipchat(hipchat_room)
+            else:
+                alert.send_to_logs()
+
+        new_alerts = []
+        for error_key in error_key_dict['new']:
+            new_alerts.append('<a href="https://www.khanacademy.org/devadmin'
+                              '/errors/%s">%s</a>' % (error_key, error_key))
+        if new_alerts:
+            alert_msg = ('%s new errors found in app logs at hour %s: %s'
+                         % (len(error_key_dict['new']), log_hour,
+                            ' ~ '.join(new_alerts)))
+            alert = alertlib.Alert(alert_msg, html=True,
+                                   severity=logging.ERROR)
+
+            if hipchat_room:
+                alert.send_to_hipchat(hipchat_room)
+            else:
+                alert.send_to_logs()
 
     print "Done fetching logs."
 
