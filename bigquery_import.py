@@ -242,6 +242,19 @@ class BigQuery(object):
         return retval
 
 
+def _send_alert(msg, hipchat_room, html):
+    alert = alertlib.Alert(msg, severity=logging.ERROR, html=html)
+    if hipchat_room:
+        alert.send_to_hipchat(hipchat_room)
+    else:
+        alert.send_to_logs()
+
+
+def _urlize(error_key):
+    return ('<a href="https://www.khanacademy.org/devadmin/errors/%s">%s</a>'
+            % (error_key, error_key))
+
+
 def send_alerts_for_errors(date_str, hipchat_room=None):
     """If hipchat-room specified, log to hipchat as well as to logs."""
 
@@ -265,6 +278,7 @@ def send_alerts_for_errors(date_str, hipchat_room=None):
                           "please re-run the application manually to "
                           "re-authorize")
 
+        continuing_alerts = []
         for error_key in error_key_dict['continuing']:
             info = models.get_error_summary_info(error_key)
             if info is None:
@@ -275,10 +289,16 @@ def send_alerts_for_errors(date_str, hipchat_room=None):
                                     for hr in info['by_hour_and_version']
                                     if hr['hour'].startswith(date_str))
 
-            # TODO(csilvers): say how often it occurred
+            continuing_alerts.append((today_occurrences, error_key, info))
+
+        # To avoid spamming the hipchat room, show full information
+        # about the most common N errors, and a brief link to others.
+        continuing_alerts.sort()
+        N = 3
+        for (today_occurrences, error_key, info) in continuing_alerts[:N]:
             alert_msg = (
-                'Continuing error (%d occurrences so far today) found in '
-                'app logs at hour %s: %s (%s) %s\n'
+                'Frequent continuing error (%d occurrences so far today) '
+                'found in app logs at hour %s: %s (%s) %s\n'
                 'For details see '
                 'https://www.khanacademy.org/devadmin/errors/%s' % (
                     today_occurrences,
@@ -287,28 +307,21 @@ def send_alerts_for_errors(date_str, hipchat_room=None):
                     info["error_def"]["status"],
                     info["error_def"]["title"],
                     error_key))
-            alert = alertlib.Alert(alert_msg, severity=logging.ERROR)
+            _send_alert(alert_msg, hipchat_room, html=False)
 
-            if hipchat_room:
-                alert.send_to_hipchat(hipchat_room)
-            else:
-                alert.send_to_logs()
+        continuing_alerts = continuing_alerts[N:]
+        if continuing_alerts:
+            id_urls = ' ~ '.join(_urlize(c[1]) for c in continuing_alerts)
+            alert_msg = ('%s more continuing errors (most frequent first): %s'
+                         % (len(continuing_alerts), id_urls))
+            _send_alert(alert_msg, hipchat_room, html=True)
 
-        new_alerts = []
-        for error_key in error_key_dict['new']:
-            new_alerts.append('<a href="https://www.khanacademy.org/devadmin'
-                              '/errors/%s">%s</a>' % (error_key, error_key))
+        new_alerts = sorted(error_key_dict['new'])
         if new_alerts:
+            id_urls = ' ~ '.join(_urlize(n) for n in new_alerts)
             alert_msg = ('%s new errors found in app logs at hour %s: %s'
-                         % (len(error_key_dict['new']), log_hour,
-                            ' ~ '.join(new_alerts)))
-            alert = alertlib.Alert(alert_msg, html=True,
-                                   severity=logging.ERROR)
-
-            if hipchat_room:
-                alert.send_to_hipchat(hipchat_room)
-            else:
-                alert.send_to_logs()
+                         % (len(error_key_dict['new']), log_hour, id_urls))
+            _send_alert(alert_msg, hipchat_room, html=True)
 
     print "Done fetching logs."
 
