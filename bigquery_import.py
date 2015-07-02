@@ -189,10 +189,10 @@ class BigQuery(object):
         In case of an error, raises one of the exceptions
         at the top of the file.
         """
-        if models.check_log_data_received(log_hour):
-            return {}
-
         retval = {'new': set(), 'continuing': set(), 'blacklist': set()}
+
+        if models.check_log_data_received(log_hour):
+            return retval
 
         lines = 0
         print "Fetching hourly logs for %s" % log_hour
@@ -271,11 +271,17 @@ def send_alerts_for_errors(date_str, hipchat_room=None):
                 raise Exception("Could not find error key %s in redis" %
                                 error_key)
 
+            today_occurrences = sum(int(hr['count'])
+                                    for hr in info['by_hour_and_version']
+                                    if hr['hour'].startswith(date_str))
+
             # TODO(csilvers): say how often it occurred
             alert_msg = (
-                'Continuing error found in app logs at hour %s: %s (%s) %s\n'
+                'Continuing error (%d occurrences so far today) found in '
+                'app logs at hour %s: %s (%s) %s\n'
                 'For details see '
                 'https://www.khanacademy.org/devadmin/errors/%s' % (
+                    today_occurrences,
                     log_hour,
                     models.ERROR_LEVELS[int(info["error_def"]["level"])],
                     info["error_def"]["status"],
