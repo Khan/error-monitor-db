@@ -67,6 +67,12 @@ _ALERT_BLACKLIST = [
 
     # One day we'll figure out what causes this!
     'Problem out of order',
+    'SAT problem out of order',
+
+    # And likewise this.  Tom thinks it's just a user having multiple
+    # browser windows open, but I think it's happening too often to be
+    # just that.
+    re.compile(r'client mastery task \(\d+\) is OLDER than server'),
 ]
 
 
