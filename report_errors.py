@@ -75,9 +75,9 @@ _ErrorInfo = collections.namedtuple("_ErrorInfo",
 
 
 def _urlize_with_count(error_info):
-    return ('<a href="https://www.khanacademy.org/devadmin/errors/%s"'
-            ' title="%d">%s</a>'
-            % (error_info.key, error_info.count, error_info.key))
+    return ('<a href="https://www.khanacademy.org/devadmin/errors/%s">'
+            '%s (%d)</a>'
+            % (error_info.key, error_info.key, error_info.count))
 
 
 def _parse_error_info(error_dict, start_date, end_date):
@@ -125,6 +125,9 @@ def _categorize_errors(errors, start_date, end_date):
 
     for error in errors:
         error_info = _parse_error_info(error, start_date, end_date)
+        # Ignore errors that we haven't seen in the last 24 hours.
+        if error_info.count == 0:
+            continue
 
         if _matches_blacklist(error_info.title):
             categories['blacklist'].append(error_info)
@@ -201,13 +204,13 @@ def send_alerts_for_errors(hostport,
     continuing_msgs = [_urlize_with_count(e) for e in categories['old']
                        if e not in highlighted_errors]
     if continuing_msgs:
-        msgs += ['%s long-running errors (hover to see their frequency): %s '
+        msgs += ['%s long-running errors (with frequency): %s '
                  % (len(continuing_msgs), ' ~ '.join(continuing_msgs))]
 
     new_msgs = [_urlize_with_count(e) for e in categories['new']
                 if e not in highlighted_errors]
     if new_msgs:
-        msgs += ['%s new errors since %s (hover to see their frequency): %s '
+        msgs += ['%s new errors since %s (with frequency): %s '
                  % (len(new_msgs), start_date, ' ~ '.join(new_msgs))]
 
     msg_str = '<br>\n'.join(msgs)
