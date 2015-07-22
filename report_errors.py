@@ -7,6 +7,7 @@ error-monitor-db internals, to show that it can be run from any
 anywhere.
 """
 
+import cgi
 import collections
 import datetime
 import json
@@ -199,7 +200,7 @@ def send_alerts_for_errors(hostport,
                  '<a href="https://www.khanacademy.org/devadmin/errors/%s">'
                  '%s</a> (%s)'
                  % (error_info.count, error_info.key,
-                    error_info.title or '<empty>', error_info.status)]
+                    cgi.escape(error_info.title), error_info.status)]
 
     continuing_msgs = [_urlize_with_count(e) for e in categories['old']
                        if e not in highlighted_errors]
