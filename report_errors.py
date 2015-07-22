@@ -198,8 +198,8 @@ def send_alerts_for_errors(hostport,
         msgs += ['Frequent error (%d occurrences in this date range): '
                  '<a href="https://www.khanacademy.org/devadmin/errors/%s">'
                  '%s</a> (%s)'
-                 % (error_info.count, error_info.key, error_info.title,
-                    error_info.status)]
+                 % (error_info.count, error_info.key,
+                    error_info.title or '<empty>', error_info.status)]
 
     continuing_msgs = [_urlize_with_count(e) for e in categories['old']
                        if e not in highlighted_errors]
