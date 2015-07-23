@@ -182,6 +182,12 @@ def monitor_results(version_id, minute):
                 version_counts, monitor_count)
 
         if probability >= 0.9995:
+            if monitor_count == 1:
+                # An error that only occurs once is probably a fluctuation
+                # in the space-time continuum.  Just ignore it.
+                logging.warning("Not reporting error; only occurs once.")
+                continue
+
             if monitor_count < 5:
                 # Special-case for really infrequent errors! Only error if we
                 # haven't seen this error before in *any* minute of a previous
