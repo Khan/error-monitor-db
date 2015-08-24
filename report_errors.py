@@ -57,7 +57,7 @@ def _matches_blacklist(logline):
 
 
 def _fetch_error_json(hostport):
-    url = 'http://%s/recent_errors' % (hostport)
+    url = 'http://%s/recent_errors' % hostport
     return json.load(urllib2.urlopen(url))
 
 
@@ -102,7 +102,7 @@ def _parse_error_info(error_dict, start_date, end_date):
     count = 0
     for record in error_dict['by_hour_and_version']:
         # Luckily we can compare YYYYMMDD_HH entries lexicographically!
-        if record['hour'] >= start_date and record['hour'] < end_date:
+        if start_date <= record['hour'] < end_date:
             count += int(record['count'])
             dates_seen.add(record['hour'])
 
