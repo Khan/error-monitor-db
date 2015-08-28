@@ -11,16 +11,13 @@ stored in Redis by version and error key for later reference.
 
 To see how errors are stored, see models.py.
 
-There are two dependencies here that are not included in the repo for security
+There is a dependency here that are not included in the repo for security
 reasons:
 
   client_secrets.json - Contains the Google AppEngine "Client ID for native
       application". To get this, go here and click "Download JSON":
 
   https://console.developers.google.com/project/124072386181/apiui/credential
-
-  secrets.py - Contains the HipChat token that alertlib relies on to send
-      notifications.
 """
 import datetime
 import httplib2
@@ -39,7 +36,6 @@ import oauth2client.client
 import oauth2client.file
 import oauth2client.tools
 
-import alertlib
 import models
 
 # The AppEngine project number for 'khan' (NOT 'khan-academy' for historical
@@ -193,14 +189,6 @@ class BigQuery(object):
                "%d new, and %d continuing"
                % (lines, num_new + num_old, num_new, num_old))
         models.record_log_data_received(log_hour)
-
-
-def _send_alert(msg, hipchat_room, html):
-    alert = alertlib.Alert(msg, severity=logging.ERROR, html=html)
-    if hipchat_room:
-        alert.send_to_hipchat(hipchat_room)
-    else:
-        alert.send_to_logs()
 
 
 def _urlize(error_key):
