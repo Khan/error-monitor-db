@@ -61,13 +61,20 @@ def _fetch_error_json(hostport):
     return json.load(urllib2.urlopen(url))
 
 
-def _send_alert(msg, hipchat_room):
-    """msg should be html."""
-    alert = alertlib.Alert(msg, severity=logging.ERROR, html=True)
+def _send_alerts(hipchat_msg, hipchat_room, slack_attachments, slack_channel):
+    """Send alerts to HipChat and Slack.
+    
+    hipchat_msg should be HTML.
+    """
+    alert = alertlib.Alert(hipchat_msg, severity=logging.ERROR, html=True)
     if hipchat_room:
         alert.send_to_hipchat(hipchat_room)
+    if slack_channel:
+        alert.send_to_slack(slack_channel, attachments=slack_attachments)
     # We always send the alert to stdout as well
-    print msg
+    for a in slack_attachments:
+        print a['fallback']
+    print '-' * 40 + '\n'
 
 
 _ErrorInfo = collections.namedtuple("_ErrorInfo",
@@ -75,10 +82,74 @@ _ErrorInfo = collections.namedtuple("_ErrorInfo",
                                      "dates_seen", "first_date_seen"])
 
 
-def _urlize_with_count(error_info):
+def _hipchat_error_link(error_info):
+    """Return a brief link to an error suitable for use in hipchat."""
     return ('<a href="https://www.khanacademy.org/devadmin/errors/%s">'
-            '%s (%d)</a>'
-            % (error_info.key, error_info.key, error_info.count))
+            '%s</a> (%d)' % (error_info.key, error_info.key, error_info.count))
+
+
+def _slack_error_link(error_info):
+    """Return a brief link to an error suitable for use in slack."""
+    return ('<https://www.khanacademy.org/devadmin/errors/%s|%s> (%d)' %
+            (error_info.key, error_info.key, error_info.count))
+
+
+def _plaintext_error_link(error_info):
+    """Return a brief plaintext link to an error."""
+    return ('<https://www.khanacademy.org/devadmin/errors/%s> (%d)' %
+            (error_info.key, error_info.count))
+
+
+def _hipchat_error_message(error_info):
+    """Return an HTML message with error information for use in hipchat."""
+    return ('Frequent error (%d occurrences in this date range): '
+            '<a href="https://www.khanacademy.org/devadmin/errors/%s">'
+            '%s</a> (%s)' % (error_info.count, error_info.key,
+                             cgi.escape(error_info.title), error_info.status))
+
+
+def _slack_error_attachment(error_info):
+    """Return an attachment field with error information for use in slack."""
+    return {
+        'text': ('*Frequent error (%d occurrences in this date range):*\n'
+                 '<https://www.khanacademy.org/devadmin/errors/%s|%s> (%s)' %
+                 (error_info.count, error_info.key,
+                  cgi.escape(error_info.title), error_info.status)),
+        'fallback': ('Frequent error (%d occurrences in this date range):\n%s '
+                     '<https://www.khanacademy.org/devadmin/errors/%s> (%s)' %
+                     (error_info.count, cgi.escape(error_info.title),
+                      error_info.key, error_info.status)),
+        'color': 'danger',
+        'mrkdwn_in': ['text'],
+    }
+
+
+def _hipchat_error_list(error_infos, error_type):
+    """Return an HTML message with a list of errors.
+
+    See _slack_error_list for arguments.
+    """
+    title = ('%s %s errors (with frequency)' % (len(error_infos), error_type))
+    hipchat_links = ' ~ '.join(_hipchat_error_link(e) for e in error_infos)
+    return '%s:\n%s' % (title, hipchat_links)
+
+
+def _slack_error_list(error_infos, error_type):
+    """Return a slack attachment field with a list of errors.
+
+    error_infos should be a list of errors.  error_type should be the type of
+    errors we are displaying (e.g. "long-running errors" or "new errors since
+    <date>").
+    """
+    title = ('%s %s (with frequency)' % (len(error_infos), error_type))
+    return {
+        'text': '*%s:*\n%s' % (
+            title, ' ~ '.join(_slack_error_link(e) for e in error_infos)),
+        'fallback': '%s:\n%s' % (
+            title, ' ~ '.join(_plaintext_error_link(e) for e in error_infos)),
+        'color': 'danger',
+        'mrkdwn_in': ['text'],
+    }
 
 
 def _parse_error_info(error_dict, start_date, end_date):
@@ -152,7 +223,7 @@ def _categorize_errors(errors, start_date, end_date):
 def send_alerts_for_errors(hostport,
                            start_date, end_date, num_errors_to_highlight,
                            new_only,
-                           hipchat_room):
+                           hipchat_room, slack_channel):
     """Process the error logs between start and end date and send a report.
 
     We always send the report to stdout.  If hipchat_room is not None, we
@@ -169,7 +240,9 @@ def send_alerts_for_errors(hostport,
         new_only: if set, only report new errors: those whose first
             occurrence is on or after start_date
         hipchat_room: the name of the hipchat room to send the error report
-            to.  Can be None, in which case we just emit the report to stdout.
+            to.  Can be None, in which case we won't send to Hipchat.
+        slack_channel: the name of the slack room to send the error report to.
+            Can be None, in which case we won't send to Slack.
     """
     error_json = _fetch_error_json(hostport)
     errors = error_json['errors']
@@ -180,13 +253,21 @@ def send_alerts_for_errors(hostport,
     all_dates_seen = reduce(lambda x, y: x | y.dates_seen, categories['all'],
                             set())
 
-    msgs = ['Found <b>%d</b> unique errors (<b>%d</b> total) '
-            'between %s and %s (UTC)'
-            % (len(categories['all']), full_count,
-               min(all_dates_seen), max(all_dates_seen))]
+    hipchat_msgs = ['Found <b>%d</b> unique errors (<b>%d</b> total) '
+                    'between %s and %s (UTC)'
+                    % (len(categories['all']), full_count,
+                       min(all_dates_seen), max(all_dates_seen))]
+    slack_pretext = ('Found *%d* unique errors (*%d* total) '
+                     'between %s and %s (UTC)'
+                     % (len(categories['all']), full_count,
+                        min(all_dates_seen), max(all_dates_seen)))
     if min(all_dates_seen) != start_date:
-        msgs += ['<b>WARNING:</b> requested error info since %s, but we only '
-                 'have error info from %s' % (start_date, min(all_dates_seen))]
+        hipchat_msgs += ['<b>WARNING:</b> requested error info since %s, '
+                         'but we only have error info from %s' %
+                         (start_date, min(all_dates_seen))]
+        slack_pretext = (slack_pretext + '\n*WARNING:* requested error info '
+                         'since %s, but we only have error info from %s' %
+                         (start_date, min(all_dates_seen)))
     # TODO(csilvers): do a similar warning for end_date?  Harder since it's
     # non-inclusive.
 
@@ -194,29 +275,33 @@ def send_alerts_for_errors(hostport,
         categories['old'] = []
         categories['whitelist'] = categories['new']
 
+    slack_attachments = []
+
     highlighted_errors = categories['whitelist'][:num_errors_to_highlight]
     for error_info in highlighted_errors:
-        msgs += ['Frequent error (%d occurrences in this date range): '
-                 '<a href="https://www.khanacademy.org/devadmin/errors/%s">'
-                 '%s</a> (%s)'
-                 % (error_info.count, error_info.key,
-                    cgi.escape(error_info.title), error_info.status)]
+        hipchat_msgs.append(_hipchat_error_message(error_info))
+        slack_attachments.append(_slack_error_attachment(error_info))
 
-    continuing_msgs = [_urlize_with_count(e) for e in categories['old']
+    continuing_msgs = [e for e in categories['old']
                        if e not in highlighted_errors]
     if continuing_msgs:
-        msgs += ['%s long-running errors (with frequency): %s '
-                 % (len(continuing_msgs), ' ~ '.join(continuing_msgs))]
+        error_type = "long-running errors"
+        hipchat_msgs.append(_hipchat_error_list(continuing_msgs, error_type))
+        slack_attachments.append(_slack_error_list(continuing_msgs,
+                                                         error_type))
 
-    new_msgs = [_urlize_with_count(e) for e in categories['new']
+    new_msgs = [e for e in categories['new']
                 if e not in highlighted_errors]
     if new_msgs:
-        msgs += ['%s new errors since %s (with frequency): %s '
-                 % (len(new_msgs), start_date, ' ~ '.join(new_msgs))]
+        error_type = "new errors since %s" % start_date
+        hipchat_msgs.append(_hipchat_error_list(new_msgs, error_type))
+        slack_attachments.append(_slack_error_list(new_msgs, error_type))
 
-    msg_str = '<br>\n'.join(msgs)
-    _send_alert(msg_str, hipchat_room)
-    print "-------------------------------------------------------\n"
+    hipchat_msg_str = '<br>\n'.join(hipchat_msgs)
+    slack_attachments[0]['pretext'] = slack_pretext
+    slack_attachments[0]['mrkdwn_in'].append('pretext')
+    _send_alerts(hipchat_msg_str, hipchat_room,
+                 slack_attachments, slack_channel)
 
 
 if __name__ == "__main__":
@@ -245,6 +330,8 @@ if __name__ == "__main__":
                               "May include a port too. Default: %(default)s"))
     parser.add_argument("-H", "--hipchat", dest="hipchat",
                         help="Hipchat room to send the error report to.")
+    parser.add_argument("-S", "--slack", dest="slack",
+                        help="Slack channel to send the error report to.")
     parser.add_argument('-n', '--num-errors-to-highlight', type=int,
                         default=3,
                         help=("How many errors to emit detailed error info "
@@ -256,4 +343,4 @@ if __name__ == "__main__":
 
     send_alerts_for_errors(args.host, args.start_date, args.end_date,
                            args.num_errors_to_highlight, args.new_only,
-                           args.hipchat)
+                           args.hipchat, args.slack)
