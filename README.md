@@ -3,6 +3,8 @@ error-monitor-db
 
 Error monitoring service for errors from the Khan Academy webapp monitoring / logging infrastructure.
 
+This is deployed on internal-services.khanacademy.org, and may be restarted by running `sudo restart error-monitor-db`.  The scripts `bigquery_import.py` and `report_errors.py` are invoked by cron (see aws-config/internal-services/crontab).
+
 There are two kinds of error monitoring we want to implement:
 
 Deploy-time error monitoring
