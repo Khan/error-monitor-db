@@ -63,14 +63,15 @@ def _fetch_error_json(hostport):
 
 def _send_alerts(hipchat_msg, hipchat_room, slack_attachments, slack_channel):
     """Send alerts to HipChat and Slack.
-    
+
     hipchat_msg should be HTML.
     """
-    alert = alertlib.Alert(hipchat_msg, severity=logging.ERROR, html=True)
     if hipchat_room:
-        alert.send_to_hipchat(hipchat_room)
+        (alertlib.Alert(hipchat_msg, severity=logging.ERROR, html=True)
+         .send_to_hipchat(hipchat_room))
     if slack_channel:
-        alert.send_to_slack(slack_channel, attachments=slack_attachments)
+        (alertlib.Alert('', severity=logging.ERROR)
+         .send_to_slack(slack_channel, attachments=slack_attachments))
     # We always send the alert to stdout as well
     for a in slack_attachments:
         print a['fallback']
