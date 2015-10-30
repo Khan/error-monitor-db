@@ -16,6 +16,37 @@ app = flask.Flask("Khan Academy Error Monitor")
 r = redis.StrictRedis(host='localhost', port=6379, db=0)
 
 
+# A list of tuples (error, threshold).  We blacklist these errors unless the
+# number of errors per minute is greater than the threshold.  This lets us
+# blacklist errors that we don't care about a somewhat heightened level of, but
+# still get alerted if we see a massive spike.  This is separate from
+# report_errors.py's list because here we only care about errors that may be
+# heightened on deploy, rather than errors we see a lot in general, and we may
+# want to blacklist errors that are bad in general but not caused by deploys.
+# The thresholds are selected somewhat arbitrarily.
+# TODO(benkraft): consider switching to a threshold that will scale on the
+# previous error rate or the number of requests.  It would be trickier to get
+# right but might be more accurate.
+_ERROR_BLACKLIST_THRESHOLDS = [
+    # OOMs, which often spike to 10-20/min on deploys.  A massive spike could
+    # still mean a problem, such as if someone did `range(10**12)` in
+    # `main.py`.
+    ('Exceeded soft private memory limit', 100),
+    # Requests that timed out before getting sent to an instance.  These are
+    # bad, but they are probably a matter of insufficient priming or an
+    # unrelated issue and not the deployer's fault, unless there are very large
+    # numbers of them.
+    ('Request was aborted after waiting too long', 100),
+]
+
+
+def _matches_blacklist(logline, count):
+    for error, threshold in _ERROR_BLACKLIST_THRESHOLDS:
+        if error in logline and count <= threshold:
+            return True
+    return False
+
+
 def _version_sort_key(version):
     """HACK: sort versions so that Dec '14 sorts before Jan '15.
 
@@ -167,8 +198,12 @@ def monitor_results(version_id, minute):
     errors = models.get_monitoring_errors(version_id, minute)
 
     for error, monitor_count in errors:
+        # Warn about the error even if it's blacklisted.
         logging.warning("MONITORING ERROR IN %s: %s (%d)" % (
                 version_id, error["title"], monitor_count))
+
+        if _matches_blacklist(error, monitor_count):
+            continue
 
         # Get the counts for this error in the same minute of the reference
         # version monitoring histories
