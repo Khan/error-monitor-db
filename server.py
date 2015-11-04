@@ -37,6 +37,10 @@ _ERROR_BLACKLIST_THRESHOLDS = [
     # unrelated issue and not the deployer's fault, unless there are very large
     # numbers of them.
     ('Request was aborted after waiting too long', 100),
+    # Failed send to graphite.  Not sure why these spike on deploy sometimes,
+    # but they do.  They're a 200 and in the worst case just mean we didn't
+    # send logs to graphite.
+    ('ApplicationError: 4 Unknown error', 100),
 ]
 
 
