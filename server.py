@@ -202,7 +202,7 @@ def monitor_results(version_id, minute):
         logging.warning("MONITORING ERROR IN %s: %s (%d)" % (
                 version_id, error["title"], monitor_count))
 
-        if _matches_blacklist(error, monitor_count):
+        if _matches_blacklist(error["title"], monitor_count):
             continue
 
         # Get the counts for this error in the same minute of the reference
