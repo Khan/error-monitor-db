@@ -99,7 +99,7 @@ class BigQuery(object):
         """
         # Try a few times because occasionally BigQuery returns early without
         # any response data
-        for attempt in range(3):
+        for attempt in xrange(3):
             try:
                 # Create a query statement and query request object
                 query_data = {'query': sql}
@@ -113,9 +113,24 @@ class BigQuery(object):
                 err_json = json.loads(err.content)
                 # Traverse the unnecessarily complex JSON to check if the error
                 # is simply that the table was not found.
-                if ((err_json.get("error", {}).get("errors", []) or [{}])[0]
-                        .get("reason", "") == "notFound"):
+                try:
+                    code = err_json['error']['code']
+                    message = err_json['error']['errors'][0]['message']
+                    reason = err_json['error']['errors'][0]['reason']
+                except (KeyError, IndexError):
+                    raise UnknownBigQueryError(err_json)
+
+                if reason == 'notFound':
                     raise TableNotFoundError()
+                elif code >= 500:             # transient error, let's retry
+                    pass
+                elif (code == 403 and         # let's retry that too
+                        message.startswith('Exceeded rate limits')):
+                    pass                      # they *told* us to retry
+                elif ('Please try again' in message or
+                        'Retrying may solve the problem' in message or
+                        'Backend Error' in message):
+                    pass
 
                 raise UnknownBigQueryError(err_json)
 
