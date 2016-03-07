@@ -14,6 +14,8 @@ class ErrorMonitorTest(unittest.TestCase):
         # the production db
         self.old_r = models.r
         models.r = fakeredis.FakeStrictRedis()
+        models.r.flushall()       # clear the redis db for the new test
+        models._reset_caches()
 
         # Simple implementation of 'scan', since it's missing from
         # `FakeStrictRedis`
@@ -72,6 +74,16 @@ class ErrorMonitorTest(unittest.TestCase):
                     "ip": "1.1.1.1", "route": "/leia", "module_id": "default",
                     "message": "Error Help me, Obi Wan Kenobi. You're my only "
                         "hope"},
+                {"status": 500, "level": 4, "resource": "/leia",
+                    "ip": "1.1.1.1", "route": "/luke", "module_id": "default",
+                    "message": "Error Help me, Obi Wan Kenobi. Train me in "
+                        "ways of the force"},
+
+                # A third unique error, but it's ignored because
+                # singleton errors are ignored.
+                {"status": 500, "level": 4, "resource": "/test",
+                    "ip": "1.1.1.1", "route": "/test", "module_id": "default",
+                    "message": "This error only occurs once."},
             ],
             'minute': 0,
             'version': 'v001'
@@ -81,7 +93,7 @@ class ErrorMonitorTest(unittest.TestCase):
                 headers={"Content-type": "application/json"})
         assert rv.status_code == 200
 
-        # Now the monitor results should show some new errors
+        # The monitor results should also show some new errors.
         rv = self.app.get('/errors/v001/monitor/0?verify_versions=v000')
         assert 'directive 1' in rv.data
         assert 'directive 2' not in rv.data
@@ -91,22 +103,9 @@ class ErrorMonitorTest(unittest.TestCase):
         assert 'errors' in ret
         assert len(ret['errors']) == 2
 
-        # Extract the error keys for the new errors and look them up by the
-        # first word in the message
-        error_keys = {
-            e['message'].split(" ")[0]: e['key']
-            for e in ret['errors']
-        }
-
         # Request for summary info for a garbage error fails
         rv = self.app.get("/error/GARBAGE")
         assert rv.status_code == 404
-
-        # Request an actual error, see that it is reported for the monitoring
-        # version
-        rv = self.app.get("/error/%s" % error_keys["Help"])
-        assert rv.status_code == 200
-        assert '"MON_v001": 1' in rv.data
 
         # The same analysis with an invalid version would *not* report any
         # errors, because we have no data for the supposedly successful
@@ -147,7 +146,10 @@ class ErrorMonitorTest(unittest.TestCase):
                     "message": "Help me, Obi Wan Kenobi. You're my only hope"},
 
                 # This is a brand new error. We want to know about it even
-                # though it only happened once
+                # though it only happened twice.
+                {"status": 404, "level": 4, "resource": "/home",
+                    "ip": "1.1.1.1", "route": "/home", "module_id": "default",
+                    "message": "There's no place like home."},
                 {"status": 404, "level": 4, "resource": "/home",
                     "ip": "1.1.1.1", "route": "/home", "module_id": "default",
                     "message": "There's no place like home."},
@@ -167,12 +169,6 @@ class ErrorMonitorTest(unittest.TestCase):
         ret = json.loads(rv.data)
         assert 'errors' in ret
         assert len(ret['errors']) == 2
-
-        # Request the previous error again to see the new version added
-        rv = self.app.get("/error/%s" % error_keys["Help"])
-        assert rv.status_code == 200
-        assert '"MON_v001": 1' in rv.data
-        assert '"MON_v002": 6' in rv.data
 
     def test_logs_from_bigquery(self):
         # TODO(tom) Once BigQuery scraping is implemented, call that and mock
@@ -199,8 +195,8 @@ class ErrorMonitorTest(unittest.TestCase):
         errors_4, new_errors_4 = bq.errors_from_bigquery("20141110_0400")
 
         # There is only one error here, and it is new
-        assert len(errors_4) == 1
         assert len(new_errors_4) == 1
+        assert len(old_errors_4) == 0
 
         query_response = [{
             "f": [
@@ -217,11 +213,11 @@ class ErrorMonitorTest(unittest.TestCase):
         errors_5, new_errors_5 = bq.errors_from_bigquery("20141110_0500")
 
         # There is only one error here, and it is not new
-        assert len(errors_5) == 1
         assert len(new_errors_5) == 0
+        assert len(old_errors_5) == 1
 
         # Validate we stored all the correct data
-        rv = self.app.get("/error/%s" % list(errors_4)[0])
+        rv = self.app.get("/error/%s" % list(new_errors_4)[0])
         assert rv.status_code == 200
 
         # Check error def is stored correctly

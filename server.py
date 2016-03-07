@@ -1,13 +1,13 @@
 """A server that stores & retrieves error information from app logs."""
 import argparse
 import json
+import math
 
 import flask
 import logging
 import logging.handlers
 import numpy
 import redis
-import scipy.stats
 
 import models
 
@@ -63,6 +63,12 @@ def _version_sort_key(version):
     return '14' + version if version.startswith('12') else '15' + version
 
 
+def _normal_cdf(x, mean, stddev):
+    """Calculate the cdf for the normal distribution."""
+    # Taken from http://stackoverflow.com/questions/9448246/calculating-probability-of-a-random-variable-in-a-distribution-in-python
+    return 0.5 * (1 + math.erf((x - mean) / stddev / math.sqrt(2)))
+
+
 def _count_is_elevated_probability(historical_counts, recent_count):
     """Give the probability recent_count is elevated over the norm.
 
@@ -104,7 +110,7 @@ def _count_is_elevated_probability(historical_counts, recent_count):
         return (mean, 1 if recent_count > mean else 0)
 
     pvalue = (recent_count - mean) / stdev
-    zscore = scipy.stats.norm.cdf(pvalue)
+    zscore = _normal_cdf(pvalue, 0, 1)
 
     return (mean, zscore)
 
@@ -392,14 +398,6 @@ def ping():
     return flask.Response('pong', mimetype='text/plain')
 
 
-if not app.debug:
-    file_handler = logging.handlers.RotatingFileHandler(
-        '/home/ubuntu/logs/error-monitor-db-app.log',
-        maxBytes=1024 * 1024, backupCount=5)
-    file_handler.setLevel(logging.WARNING)
-    app.logger.addHandler(file_handler)
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Serve the error-monitor-db.')
 
@@ -413,4 +411,12 @@ if __name__ == "__main__":
 
     # Start the server running
     app.debug = args.debug
+
+    if not app.debug:
+        file_handler = logging.handlers.RotatingFileHandler(
+            '/home/ubuntu/logs/error-monitor-db-app.log',
+            maxBytes=1024 * 1024, backupCount=5)
+        file_handler.setLevel(logging.WARNING)
+        app.logger.addHandler(file_handler)
+
     app.run(host="0.0.0.0", port=args.port)
