@@ -189,6 +189,13 @@ _error_def_cache = {}
 _error_id_cache = {key: {} for key in _ERROR_ID_KEYS}
 
 
+def _reset_caches():
+    """Used for tests."""
+    _error_def_cache.clear()
+    for k in _error_id_cache:
+        _error_id_cache[k] = {}
+
+
 def _get_cached_error_def(error_key):
     """Retrieve the error def information from cache or Redis."""
     if error_key in _error_def_cache:

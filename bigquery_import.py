@@ -162,9 +162,12 @@ class BigQuery(object):
 
         In case of an error, raises one of the exceptions
         at the top of the file.
+
+        Returns (keys of new errors, keys of continuing errors).
+        If we've already processed these logs, returns (None, None).
         """
         if models.check_log_data_received(log_hour):
-            return
+            return (None, None)
 
         new_keys = set()
         old_keys = set()
@@ -204,6 +207,7 @@ class BigQuery(object):
                "%d new, and %d continuing"
                % (lines, num_new + num_old, num_new, num_old))
         models.record_log_data_received(log_hour)
+        return (new_keys, old_keys - new_keys)
 
 
 def _urlize(error_key):
