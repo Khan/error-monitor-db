@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 """Unit tests for the endpoints in server.py."""
 import fakeredis
 import json
@@ -95,8 +97,9 @@ class ErrorMonitorTest(unittest.TestCase):
 
         # The monitor results should also show some new errors.
         rv = self.app.get('/errors/v001/monitor/0?verify_versions=v000')
-        assert 'directive 1' in rv.data
-        assert 'directive 2' not in rv.data
+        # This should show the most recent of the 'directive' errors.
+        assert 'directive 2' in rv.data
+        assert 'directive 1' not in rv.data
         assert 'blacklisted' not in rv.data
         assert 'Obi Wan' in rv.data
         ret = json.loads(rv.data)

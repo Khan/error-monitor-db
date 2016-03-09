@@ -261,8 +261,8 @@ def _find_error_by_def(error_def):
     return None
 
 
-def _find_or_create_error(error_def, expiry):
-    """Write identifying error info to Redis if it isn't there already.
+def _create_or_update_error(error_def, expiry):
+    """Write identifying error info to Redis.
 
     'error_def' is the error information dict returned by _parse_message.
 
@@ -270,31 +270,47 @@ def _find_or_create_error(error_def, expiry):
     for no expiration). Existing errors will have their expiration lease
     renewed.
 
+    This stores the *most recent* error-message for a given key.
+    That results in more redis operations than the alternative
+    (storing first-seen), but gives a better idea of what errors are
+    current.
+
     Returns the identifier key of the existing or new error.
     """
 
     # Attempt to match an existing error
     error_key = _find_error_by_def(error_def)
-    if not error_key or not r.get("error:%s" % error_key):
-        if not error_key:
-            # If we do not have an error key, then this is a brand-new error.
-            error_key = error_def['key']
+    if not error_key:
+        # If we do not have an error key, then this is a brand-new error.
+        error_def_to_put = error_def
+        error_key = error_def['key']
+    else:
+        existing_error_def = r.get("error:%s" % error_key)
+        if existing_error_def:
+            error_def_to_put = json.loads(existing_error_def)
+            # Update the error-def's error-message with the most-recent error.
+            error_def_to_put['title'] = error_def['title']
+            error_def_to_put['status'] = error_def['status']
+            error_def_to_put['level'] = error_def['level']
         else:
-            # If we do have a key, we are dealing with an old error that
-            # matches this one but has expired from Redis but has recurred so
-            # we must recreate it, although the key may have changed
-            error_def['key'] = error_key
+            # We must be dealing with an old error that matches this
+            # error_def, but has expired from Redis.  Now that is has
+            # recurred we should recreate it, though sadly the key may
+            # have changed.
+            error_def_to_put = error_def
+            error_def_to_put['key'] = error_key
 
-        # Store the error def information as one key
-        r.set("error:%s" % error_key, json.dumps(error_def))
+    # Store the error def information as one key.
+    r.set("error:%s" % error_key, json.dumps(error_def_to_put))
 
-        # Store the IDs in the lookup tables
-        # TODO(tom) Since these are all in big hashtables, we can't expire
-        # them automatically. We could however rebuild the hashtables from
-        # all the unexpired errors.
-        for id in ["id0", "id1", "id2", "id3"]:
-            if error_def[id]:
-                r.hset("errordef:%s" % id, error_def[id], error_key)
+    # Store the IDs in the lookup tables
+    # TODO(tom) Since these are all in big hashtables, we can't expire
+    # them automatically. We could however rebuild the hashtables from
+    # all the unexpired errors.
+    # TODO(csilvers): avoid doing this if error_def[id] == r.get()[id]
+    for id in ["id0", "id1", "id2", "id3"]:
+        if error_def_to_put[id]:
+            r.hset("errordef:%s" % id, error_def_to_put[id], error_key)
 
     # Bump the expiry time for the error information
     r.expire("error:%s" % error_key, expiry)
@@ -597,7 +613,7 @@ def _update_error_details(version, status, level, resource, ip, route,
     # Look up the identifying information to see if we already have an
     # error that matches, in which case we use that error's key. If not,
     # write the new error to Redis.
-    error_key = _find_or_create_error(error_def, KEY_EXPIRY_SECONDS)
+    error_key = _create_or_update_error(error_def, KEY_EXPIRY_SECONDS)
 
     # All the occurrence-statistic Redis keys share a common prefix to keep
     # them separate from other error classes and versions
