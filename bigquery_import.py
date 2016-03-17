@@ -151,7 +151,7 @@ class BigQuery(object):
 
             return query_response['rows']
 
-    def logs_from_bigquery(self, log_hour):
+    def errors_from_bigquery(self, log_hour):
         """Retrieve logs for the specified hour from BigQuery.
 
         'log_hour' is the date portion of the request log dataset name, in the
@@ -169,12 +169,12 @@ class BigQuery(object):
         new_keys = set()
         old_keys = set()
         lines = 0
-        print "Fetching hourly logs for %s" % log_hour
+        print "Fetching hourly errors for %s" % log_hour
         records = self.run_query(
             ('SELECT version_id, ip, resource, status, app_logs.level, '
              'app_logs.message, elog_url_route, module_id '
-             'FROM [logs_hourly.requestlogs_%s] WHERE '
-             'app_logs.level >= 3') % log_hour)
+             'FROM [logs_hourly.requestlogs_%s]'
+             'WHERE app_logs.level >= 3') % log_hour)
 
         for record in records:
             (
@@ -186,7 +186,7 @@ class BigQuery(object):
             if not re.match(r'\d{6}-\d{4}-[0-9a-f]{12}', version_id):
                 continue
 
-            error_key, is_new = models.record_occurrence_from_logs(
+            error_key, is_new = models.record_occurrence_from_errors(
                 version_id, log_hour, status, level, resource, ip, route,
                 module_id, message)
 
@@ -205,6 +205,19 @@ class BigQuery(object):
                % (lines, num_new + num_old, num_new, num_old))
         models.record_log_data_received(log_hour)
 
+    def requests_from_bigquery(self, log_hour):
+        print "Fetching hourly requests for %s" % log_hour
+        records = self.run_query(
+            ('SELECT COUNT(*), status, elog_url_route '
+             'FROM [logs_hourly.requestlogs_%s] '
+             'WHERE elog_url_route IS NOT NULL '
+             'GROUP BY status, elog_url_route HAVING COUNT(*) > 1') % log_hour)
+
+        for record in records:
+            num_seen, status, route = [v['v'] for v in record['f']]
+            models.record_occurrences_from_requests(log_hour, status,
+                                                    route, num_seen)
+
 
 def _urlize(error_key):
     return ('<a href="https://www.khanacademy.org/devadmin/errors/%s">%s</a>'
@@ -217,7 +230,8 @@ def import_logs(date_str):
         log_hour = "%s_%02d" % (date_str, hour)
 
         try:
-            bq.logs_from_bigquery(log_hour)
+            bq.requests_from_bigquery(log_hour)
+            # bg.errors_from_bigquery(log_hour)
 
         except TableNotFoundError:
             # Not really an error, so we won't emit it to stderr.
@@ -245,7 +259,8 @@ if __name__ == "__main__":
     parser.add_option("-d", "--date", dest="date_str",
                       default=datetime.datetime.utcnow().strftime("%Y%m%d"),
                       help="Date (in UTC) to import logs for, in format "
-                            "YYYYMMDD. If omitted, use today's date.")
+                            ""
+                           ". If omitted, use today's date.")
     (options, args) = parser.parse_args()
 
     import_logs(options.date_str)

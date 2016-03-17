@@ -15,6 +15,7 @@ app = flask.Flask("Khan Academy Error Monitor")
 
 r = redis.StrictRedis(host='localhost', port=6379, db=0)
 
+HTTP_OK_CODE = 200
 
 # A list of tuples (error, threshold).  We blacklist these errors unless the
 # number of errors per minute is greater than the threshold.  This lets us
@@ -108,6 +109,26 @@ def _count_is_elevated_probability(historical_counts, recent_count):
     return (mean, zscore)
 
 
+def _compute_cutoffs(responses_count):
+    if len(responses_count) > 0:
+        mean = sum(responses_count) / float(len(responses_count))
+    else:
+        return 0, 20
+
+    if mean < 20:
+        variance = 20 ** 2
+    else:
+        variance = numpy.mean(map(lambda x: (x - mean) ** 2, responses_count))
+
+    # We use the normal distribution as an approximation to the
+    # poisson distribution. We raise an error if p(x > y) < 0.995
+    # or p(x < y) < 0.995.
+    lower_bound = mean - 2.58 * numpy.sqrt(variance)
+    upper_bound = mean + 2.58 * numpy.sqrt(variance)
+
+    return lower_bound, upper_bound
+
+
 @app.route("/monitor", methods=["post"])
 def monitor():
     """Accept a snapshot of AppEngine error logs and record them in Redis.
@@ -153,6 +174,45 @@ def monitor():
     models.record_monitoring_data_received(version, minute)
 
     return "OK"
+
+
+@app.route("/anomalies/<log_hour>", methods=["get"])
+def recent_anomalies(log_hour):
+    routes = models.get_routes()
+    anomalies = []
+    hour = int(log_hour.split("_")[1])
+
+    for route in routes:
+        responses_count = models.get_responses_count(route, HTTP_OK_CODE,
+                                                     log_hour)
+        lower_bound, upper_bound = models.get_thresholds(route, HTTP_OK_CODE,
+                                                         hour)
+        if responses_count < lower_bound or responses_count > upper_bound:
+            anomalies.append({
+                "route": route,
+                "status": HTTP_OK_CODE,
+                "count": responses_count,
+                "lower_bound": lower_bound,
+                "upper_bound": upper_bound,
+            })
+
+    return json.dumps({
+        "anomalies": anomalies
+    })
+
+
+@app.route("/update_thresholds", methods=["get"])
+def update_threshold():
+    routes = models.get_routes()
+    for route in routes:
+        for hour in xrange(24):
+            responses_count = models.get_hourly_responses_count(
+                route, HTTP_OK_CODE, hour)
+            lower_bound, upper_bound = _compute_cutoffs(responses_count)
+            models.set_thresholds(route, HTTP_OK_CODE, hour,
+                                  lower_bound, upper_bound)
+
+    return flask.Response('Success', mimetype='text/plain')
 
 
 @app.route("/errors/<version_id>/monitor/<int:minute>", methods=["get"])

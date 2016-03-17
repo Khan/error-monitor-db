@@ -196,7 +196,7 @@ class ErrorMonitorTest(unittest.TestCase):
                 {"v": "default"}
             ]
         } for i in xrange(5)]
-        errors_4, new_errors_4 = bq.logs_from_bigquery("20141110_0400")
+        errors_4, new_errors_4 = bq.errors_from_bigquery("20141110_0400")
 
         # There is only one error here, and it is new
         assert len(errors_4) == 1
@@ -214,7 +214,7 @@ class ErrorMonitorTest(unittest.TestCase):
                 {"v": "default"}
             ]
         } for i in xrange(7)]
-        errors_5, new_errors_5 = bq.logs_from_bigquery("20141110_0500")
+        errors_5, new_errors_5 = bq.errors_from_bigquery("20141110_0500")
 
         # There is only one error here, and it is not new
         assert len(errors_5) == 1
@@ -334,6 +334,118 @@ class ErrorMonitorTest(unittest.TestCase):
         ret = json.loads(rv.data)
         assert "errors" in ret
         assert len(ret["errors"]) == 0
+
+
+class RequestMonitorTest(unittest.TestCase):
+    def setUp(self):
+        # Mock out the Redis instance we are talking to so we don't trash
+        # the production db
+        self.old_r = models.r
+        models.r = fakeredis.FakeStrictRedis()
+
+        # Simple implementation of 'scan', since it's missing from
+        # `FakeStrictRedis`
+        models.r.scan = lambda cursor, match, count: (
+                (0, models.r.keys(match)))
+
+        # Get a test app we can make requests against
+        self.app = server.app.test_client()
+        self.app.debug = True
+
+        # Mock out the actual BigQuery query mechanism
+        self.query_response = None
+        bigquery_import.BigQuery.__init__ = lambda *args: None
+        bigquery_import.BigQuery.run_query = lambda *args: self.query_response
+        self.bq = bigquery_import.BigQuery()
+
+    def tearDown(self):
+        # Restore mocked Redis
+        models.r.flushall()
+        models.r = self.old_r
+
+    def test_single_request(self):
+        # Record a single request.
+        self.query_response = [{
+            "f": [
+                {"v": 1},
+                {"v": 200},
+                {"v": "/path"},
+            ]
+        }]
+        self.bq.requests_from_bigquery("20100101_01")
+
+        self.app.get("/update_thresholds")
+        ret = self.app.get("/anomalies/20100101_01")
+        ret = json.loads(ret.data)
+
+        assert len(ret["anomalies"]) == 0
+
+    def test_single_anomaly(self):
+        # Record multiple consistent requests over multiple dates.
+        for i in xrange(1, 11):
+            self.query_response = [{
+                "f": [
+                    {"v": 100},
+                    {"v": 200},
+                    {"v": "/path"},
+                ]
+            }]
+            self.bq.requests_from_bigquery("201001%02d_01" % i)
+
+        # Record a sudden steep drop in requests.
+        self.query_response = [{
+            "f": [
+                {"v": 1},
+                {"v": 200},
+                {"v": "/path"},
+            ]
+        }]
+        self.bq.requests_from_bigquery("20100120_01")
+
+        self.app.get("/update_thresholds")
+        ret = self.app.get("/anomalies/20100120_01")
+        ret = json.loads(ret.data)
+
+        assert len(ret["anomalies"]) == 1
+        anomaly = ret["anomalies"][0]
+        assert anomaly["route"] == "/path"
+        assert anomaly["status"] == 200
+        assert anomaly["count"] == 1
+
+    def test_multiple_anomalies(self):
+        # Record multiple consistent requests over multiple dates.
+        for i in xrange(1, 11):
+            for j in xrange(1, 11):
+                self.query_response = [{
+                    "f": [
+                        {"v": 1000 + i + j},
+                        {"v": 200},
+                        {"v": "/path"},
+                    ]
+                }]
+                self.bq.requests_from_bigquery("2010%02d%02d_01" % (i, j))
+
+        # Record multiple relatively steep drops in requests.
+        for i in xrange(1, 4):
+            self.query_response = [{
+                "f": [
+                    {"v": 800 + i},
+                    {"v": 200},
+                    {"v": "/path"},
+                ]
+            }]
+            self.bq.requests_from_bigquery("201101%02d_01" % i)
+
+        self.app.get("/update_thresholds")
+        for i in xrange(1, 4):
+            ret = self.app.get("/anomalies/201101%02d_01" % i)
+            ret = json.loads(ret.data)
+
+            assert len(ret["anomalies"]) == 1
+            anomaly = ret["anomalies"][0]
+            assert anomaly["route"] == "/path"
+            assert anomaly["status"] == 200
+            assert anomaly["count"] == 800 + i
 
 
 if __name__ == '__main__':

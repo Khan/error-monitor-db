@@ -120,6 +120,7 @@ We write to the following Redis keys:
 
 
 """
+import ast
 import datetime
 import json
 import md5
@@ -550,7 +551,7 @@ def get_error_extended_information(version, error_key):
 ####
 
 def _update_error_details(version, status, level, resource, ip, route,
-                              module, message):
+                          module, message):
     """Store a new error instance which was seen while monitoring a deploy.
 
     All the Redis keys for the data is prefixed with the version so they
@@ -716,6 +717,53 @@ def record_occurrence_during_monitoring(version, minute, status, level,
 
 
 ####
+## Anomaly detection methods
+####
+
+
+def get_routes():
+    return list(r.smembers("seen_routes"))
+
+
+def get_thresholds(route, status_code, hour):
+    result_str = r.get("route:%s:status:%s:hour:%02d:thresholds" %
+                       (route, status_code, hour))
+
+    if result_str is None:
+        return 0, 20
+    else:
+        return ast.literal_eval(result_str)
+
+
+def set_thresholds(route, status_code, hour,
+                   lower_bound, upper_bound):
+    r.set("route:%s:status:%s:hour:%02d:thresholds" %
+          (route, status_code, hour), (lower_bound, upper_bound))
+
+
+def get_responses_count(route, status_code, log_hour):
+    count = r.get("route:%s:status:%s:log_hour:%s:num_seen" %
+                  (route, status_code, log_hour))
+    if count is None:
+        count = 0
+    else:
+        count = int(count)
+
+    return count
+
+
+def get_hourly_responses_count(route, status_code, hour):
+    log_hours = r.zrange("route:%s:status:%s:hour:%02d:log_hours_seen" %
+                         (route, status_code, hour), 0, -1)
+    hourly_responses = []
+    for log_hour in log_hours:
+        count = get_responses_count(route, status_code, log_hour)
+        hourly_responses.append(count)
+
+    return hourly_responses
+
+
+####
 ## Log scraping from BigQuery
 ####
 
@@ -731,8 +779,8 @@ def check_log_data_received(log_hour):
     return r.get("available_logs:%s" % log_hour) is not None
 
 
-def record_occurrence_from_logs(version, log_hour, status, level, resource, ip,
-                                route, module, message):
+def record_occurrence_from_errors(version, log_hour, status, level, resource,
+                                  ip, route, module, message):
     """Store error details for an occurrence seen while scraping GAE app logs.
 
     'version', 'status', 'level', 'resource', 'ip', 'route', 'module', and
@@ -777,3 +825,18 @@ def record_occurrence_from_logs(version, log_hour, status, level, resource, ip,
             r.expire("last_seen:%s" % error_key, KEY_EXPIRY_SECONDS)
 
     return error_key, is_new
+
+
+def record_occurrences_from_requests(log_hour, status, route, num_seen):
+    hour = log_hour.split("_")[-1]
+
+    if r.zrank("route:%s:status:%s:hour:%s:log_hours_seen" %
+               (route, status, hour), log_hour) is not None:
+        # We've already seen this specific log hour so don't update redis.
+        return
+
+    r.sadd("seen_routes", route)
+    r.zadd("route:%s:status:%s:hour:%s:log_hours_seen" %
+           (route, status, hour), 1, log_hour)
+    r.incrby("route:%s:status:%s:log_hour:%s:num_seen" %
+             (route, status, log_hour), num_seen)
