@@ -392,6 +392,8 @@ class RequestMonitorTest(unittest.TestCase):
             }]
             self.bq.requests_from_bigquery("201001%02d_01" % i)
 
+        self.app.get("/update_thresholds")
+
         # Record a sudden steep drop in requests.
         self.query_response = [{
             "f": [
@@ -402,7 +404,6 @@ class RequestMonitorTest(unittest.TestCase):
         }]
         self.bq.requests_from_bigquery("20100120_01")
 
-        self.app.get("/update_thresholds")
         ret = self.app.get("/anomalies/20100120_01")
         ret = json.loads(ret.data)
 
@@ -446,6 +447,51 @@ class RequestMonitorTest(unittest.TestCase):
             assert anomaly["route"] == "/path"
             assert anomaly["status"] == 200
             assert anomaly["count"] == 800 + i
+
+    def test_increasing_requests(self):
+        # Simulate a path that gets more requests over time.
+        for i in xrange(1, 11):
+            for j in xrange(1, 11):
+                self.query_response = [{
+                    "f": [
+                        {"v": 100 * (10 * i + j)},
+                        {"v": 200},
+                        {"v": "/path"},
+                    ]
+                }]
+                self.bq.requests_from_bigquery("2010%02d%02d_01" % (i, j))
+
+        self.app.get("/update_thresholds")
+
+        # Now record a day with slightly fewer requests. This shouldn't raise
+        # an anomaly
+        self.query_response = [{
+            "f": [
+                {"v": 10800},
+                {"v": 200},
+                {"v": "/path"},
+            ]
+        }]
+        self.bq.requests_from_bigquery("20110101_01")
+        ret = self.app.get("/anomalies/20110101_01")
+        ret = json.loads(ret.data)
+
+        assert len(ret["anomalies"]) == 0
+
+        # Finally record a day with way fewer requests. This should raise
+        # an anomaly.
+        self.query_response = [{
+            "f": [
+                {"v": 1000},
+                {"v": 200},
+                {"v": "/path"},
+            ]
+        }]
+        self.bq.requests_from_bigquery("20110102_01")
+        ret = self.app.get("/anomalies/20110102_01")
+        ret = json.loads(ret.data)
+        print ret, "\n\n\n\n"
+        assert len(ret["anomalies"]) == 1
 
 
 if __name__ == '__main__':

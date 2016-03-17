@@ -110,19 +110,26 @@ def _count_is_elevated_probability(historical_counts, recent_count):
 
 
 def _compute_cutoffs(responses_count):
+    # We weight recent historical data heavier than older data.
+    # TODO(karlkrauth): Consider the possibility of looking at weekly
+    # data only.
+    weights = [i + 1 for i in xrange(len(responses_count))]
+
     if len(responses_count) > 0:
-        mean = sum(responses_count) / float(len(responses_count))
+        mean = numpy.average(responses_count, weights=weights)
     else:
         return 0, 20
 
     if mean < 20:
+        # The mean is really small so make room for a lot of variance.
         variance = 20 ** 2
     else:
-        variance = numpy.mean(map(lambda x: (x - mean) ** 2, responses_count))
+        variance = numpy.average(
+            map(lambda x: (x - mean) ** 2, responses_count),
+            weights=numpy.square(weights))
 
-    # We use the normal distribution as an approximation to the
-    # poisson distribution. We raise an error if p(x > y) < 0.995
-    # or p(x < y) < 0.995.
+    # Assuming the data is normally distributed, we raise an error if
+    # p(x > y) < 0.995 or p(x < y) < 0.995.
     lower_bound = mean - 2.58 * numpy.sqrt(variance)
     upper_bound = mean + 2.58 * numpy.sqrt(variance)
 
