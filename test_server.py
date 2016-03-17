@@ -195,7 +195,7 @@ class ErrorMonitorTest(unittest.TestCase):
                 {"v": "default"}
             ]
         } for i in xrange(5)]
-        errors_4, new_errors_4 = bq.errors_from_bigquery("20141110_0400")
+        new_errors_4, old_errors_4 = bq.errors_from_bigquery("20141110_0400")
 
         # There is only one error here, and it is new
         assert len(new_errors_4) == 1
@@ -213,7 +213,7 @@ class ErrorMonitorTest(unittest.TestCase):
                 {"v": "default"}
             ]
         } for i in xrange(7)]
-        errors_5, new_errors_5 = bq.errors_from_bigquery("20141110_0500")
+        new_errors_5, old_errors_5 = bq.errors_from_bigquery("20141110_0500")
 
         # There is only one error here, and it is not new
         assert len(new_errors_5) == 0
@@ -489,7 +489,7 @@ class RequestMonitorTest(unittest.TestCase):
         self.bq.requests_from_bigquery("20110102_01")
         ret = self.app.get("/anomalies/20110102_01")
         ret = json.loads(ret.data)
-        print ret, "\n\n\n\n"
+
         assert len(ret["anomalies"]) == 1
 
 
