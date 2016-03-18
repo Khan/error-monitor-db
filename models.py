@@ -120,7 +120,6 @@ We write to the following Redis keys:
 
 
 """
-import ast
 import datetime
 import json
 import md5
@@ -755,13 +754,13 @@ def get_thresholds(route, status_code, hour):
     if result_str is None:
         return 0, 20
     else:
-        return ast.literal_eval(result_str)
+        return json.loads(result_str)
 
 
 def set_thresholds(route, status_code, hour,
                    lower_bound, upper_bound):
     r.set("route:%s:status:%s:hour:%02d:thresholds" %
-          (route, status_code, hour), (lower_bound, upper_bound))
+          (route, status_code, hour), json.dumps((lower_bound, upper_bound)))
 
 
 def get_responses_count(route, status_code, log_hour):

@@ -263,8 +263,7 @@ if __name__ == "__main__":
     parser.add_option("-d", "--date", dest="date_str",
                       default=datetime.datetime.utcnow().strftime("%Y%m%d"),
                       help="Date (in UTC) to import logs for, in format "
-                            ""
-                           ". If omitted, use today's date.")
+                           "YYYYMMDD. If omitted, use today's date.")
     (options, args) = parser.parse_args()
 
     import_logs(options.date_str)
