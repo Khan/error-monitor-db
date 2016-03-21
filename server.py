@@ -191,6 +191,11 @@ def monitor():
 
 @app.route("/anomalies/<log_hour>", methods=["get"])
 def recent_anomalies(log_hour):
+    """Get anomalies that happened at the given date formated as YYYYMMDD_HH.
+
+    An anomaly is detected when the number of responses on a specific route
+    exceeds the threshold set by /update_thresholds.
+    """
     routes = models.get_routes()
     anomalies = []
     hour = int(log_hour.split("_")[1])
@@ -216,6 +221,11 @@ def recent_anomalies(log_hour):
 
 @app.route("/update_thresholds", methods=["get"])
 def update_threshold():
+    """Update the thresholds that determine whether the number of requests on
+    each routes are anomalous. This endpoint does not need to be called every
+    time /recent_anomalies gets called but can instead be calculated at less
+    regular time intervals.
+    """
     routes = models.get_routes()
     for route in routes:
         for hour in xrange(24):

@@ -377,7 +377,7 @@ class RequestMonitorTest(unittest.TestCase):
         ret = self.app.get("/anomalies/20100101_01")
         ret = json.loads(ret.data)
 
-        assert len(ret["anomalies"]) == 0
+        self.assertEqual(len(ret["anomalies"]), 0)
 
     def test_single_anomaly(self):
         # Record multiple consistent requests over multiple dates.
@@ -406,11 +406,11 @@ class RequestMonitorTest(unittest.TestCase):
         ret = self.app.get("/anomalies/20100120_01")
         ret = json.loads(ret.data)
 
-        assert len(ret["anomalies"]) == 1
+        self.assertEqual(len(ret["anomalies"]), 1)
         anomaly = ret["anomalies"][0]
-        assert anomaly["route"] == "/path"
-        assert anomaly["status"] == 200
-        assert anomaly["count"] == 1
+        self.assertEqual(anomaly["route"], "/path")
+        self.assertEqual(anomaly["status"], 200)
+        self.assertEqual(anomaly["count"], 1)
 
     def test_multiple_anomalies(self):
         # Record multiple consistent requests over multiple dates.
@@ -441,11 +441,11 @@ class RequestMonitorTest(unittest.TestCase):
             ret = self.app.get("/anomalies/201101%02d_01" % i)
             ret = json.loads(ret.data)
 
-            assert len(ret["anomalies"]) == 1
+            self.assertEqual(len(ret["anomalies"]), 1)
             anomaly = ret["anomalies"][0]
-            assert anomaly["route"] == "/path"
-            assert anomaly["status"] == 200
-            assert anomaly["count"] == 800 + i
+            self.assertEqual(anomaly["route"], "/path")
+            self.assertEqual(anomaly["status"], 200)
+            self.assertEqual(anomaly["count"], 800 + i)
 
     def test_increasing_requests(self):
         # Simulate a path that gets more requests over time.
@@ -475,7 +475,7 @@ class RequestMonitorTest(unittest.TestCase):
         ret = self.app.get("/anomalies/20110101_01")
         ret = json.loads(ret.data)
 
-        assert len(ret["anomalies"]) == 0
+        self.assertEqual(len(ret["anomalies"]), 0)
 
         # Finally record a day with way fewer requests. This should raise
         # an anomaly.
@@ -490,7 +490,35 @@ class RequestMonitorTest(unittest.TestCase):
         ret = self.app.get("/anomalies/20110102_01")
         ret = json.loads(ret.data)
 
-        assert len(ret["anomalies"]) == 1
+        self.assertEqual(len(ret["anomalies"]), 1)
+
+    def test_zero_requests(self):
+        # Simulate a path that gets many requests over ten days.
+        for i in xrange(1, 11):
+            self.query_response = [{
+                "f": [
+                    {"v": 1000},
+                    {"v": 200},
+                    {"v": "/path"},
+                ]
+            }]
+            self.bq.requests_from_bigquery("201001%02d_01" % i)
+
+        self.app.get("/update_thresholds")
+
+        # Now record a day where the request does not appear in logs.
+        self.query_response = []
+
+        # We still expect to get an anomaly since requests_from_bigquery will
+        # record 0 hits for any request/status combinations that we have
+        # previously seen but haven't seen on the particular hour the function
+        # gets called. Note that this did not apply to other tests since we
+        # only called requests_from_bigquery on specific dates.
+        self.bq.requests_from_bigquery("20100111_01")
+        ret = self.app.get("/anomalies/20100111_01")
+        ret = json.loads(ret.data)
+
+        self.assertEqual(len(ret["anomalies"]), 1)
 
 
 if __name__ == '__main__':

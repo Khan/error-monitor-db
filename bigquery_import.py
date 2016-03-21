@@ -222,6 +222,13 @@ class BigQuery(object):
             models.record_occurrences_from_requests(log_hour, status,
                                                     route, num_seen)
 
+        # Add any route/status combinations that didn't occur into the model.
+        for route in models.get_routes():
+            for status in models.get_statuses():
+                if models.get_responses_count(route, status, log_hour) == 0:
+                    models.record_occurrences_from_requests(log_hour, status,
+                                                            route, 0)
+
 
 def _urlize(error_key):
     return ('<a href="https://www.khanacademy.org/devadmin/errors/%s">%s</a>'

@@ -744,10 +744,17 @@ def record_occurrence_during_monitoring(version, minute, status, level,
 
 
 def get_routes():
+    """Get all routes that have been seen."""
     return list(r.smembers("seen_routes"))
 
 
+def get_statuses():
+    """Get all status codes that have been seen."""
+    return list(r.smembers("seen_statuses"))
+
+
 def get_thresholds(route, status_code, hour):
+    """Get the anomaly threshold for the given request at the given hour."""
     result_str = r.get("route:%s:status:%s:hour:%02d:thresholds" %
                        (route, status_code, hour))
 
@@ -759,11 +766,13 @@ def get_thresholds(route, status_code, hour):
 
 def set_thresholds(route, status_code, hour,
                    lower_bound, upper_bound):
+    """Set the anomaly threshold for the given request at the given hour."""
     r.set("route:%s:status:%s:hour:%02d:thresholds" %
           (route, status_code, hour), json.dumps((lower_bound, upper_bound)))
 
 
 def get_responses_count(route, status_code, log_hour):
+    """Get the number of requests for a specific date."""
     count = r.get("route:%s:status:%s:log_hour:%s:num_seen" %
                   (route, status_code, log_hour))
     if count is None:
@@ -775,6 +784,11 @@ def get_responses_count(route, status_code, log_hour):
 
 
 def get_hourly_responses_count(route, status_code, hour):
+    """Get a list of counts of the number of requests made for a specific hour.
+
+    The list consists of all days since we started seeing this particular
+    request sorted by least recent to most recent.
+    """
     log_hours = r.zrange("route:%s:status:%s:hour:%02d:log_hours_seen" %
                          (route, status_code, hour), 0, -1)
     hourly_responses = []
@@ -850,6 +864,20 @@ def record_occurrence_from_errors(version, log_hour, status, level, resource,
 
 
 def record_occurrences_from_requests(log_hour, status, route, num_seen):
+    """Store the number of requests to a given route that returned the given
+    HTTP status code seen while scraping GAE logs. We will only ever record
+    a specific log_hour once, upon first seeing it.
+
+    log_hour: The suffix of the BigQuery dataset name, which is a string
+    in the format 'YYYYMMDD_HH', for example '20141120_10'. This is
+    convenient because string ordering is chronological.
+
+    status: The HTTP status code the request returned.
+
+    route: The route identifier of the handler that handled the request.
+
+    num_seen: The number of times the request was seen.
+    """
     hour = log_hour.split("_")[-1]
 
     if r.zrank("route:%s:status:%s:hour:%s:log_hours_seen" %
@@ -858,6 +886,7 @@ def record_occurrences_from_requests(log_hour, status, route, num_seen):
         return
 
     r.sadd("seen_routes", route)
+    r.sadd("seen_statuses", status)
     r.zadd("route:%s:status:%s:hour:%s:log_hours_seen" %
            (route, status, hour), 1, log_hour)
     r.incrby("route:%s:status:%s:log_hour:%s:num_seen" %
