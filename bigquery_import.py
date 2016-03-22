@@ -166,9 +166,6 @@ class BigQuery(object):
         Returns (keys of new errors, keys of continuing errors).
         If we've already processed these logs, returns (None, None).
         """
-        if models.check_log_data_received(log_hour):
-            return (None, None)
-
         new_keys = set()
         old_keys = set()
         lines = 0
@@ -206,7 +203,6 @@ class BigQuery(object):
         print ("Processed %d lines and found %d distinct errors: "
                "%d new, and %d continuing"
                % (lines, num_new + num_old, num_new, num_old))
-        models.record_log_data_received(log_hour)
         return (new_keys, old_keys - new_keys)
 
     def requests_from_bigquery(self, log_hour):
@@ -241,8 +237,12 @@ def import_logs(date_str):
         log_hour = "%s_%02d" % (date_str, hour)
 
         try:
+            if models.check_log_data_received(log_hour):
+                continue
+
             bq.requests_from_bigquery(log_hour)
             # bg.errors_from_bigquery(log_hour)
+            models.record_log_data_received(log_hour)
 
         except TableNotFoundError:
             # Not really an error, so we won't emit it to stderr.
