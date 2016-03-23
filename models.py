@@ -757,8 +757,8 @@ def get_thresholds(route, status_code, hour):
     """Get the anomaly threshold for the given request at the given hour."""
     result_str = r.get("route:%s:status:%s:hour:%02d:thresholds" %
                        (route, status_code, hour))
-
     if result_str is None:
+        # The thresholds weren't set yet so return relatively low bounds.
         return 0, 20
     else:
         return json.loads(result_str)
@@ -789,13 +789,17 @@ def get_hourly_responses_count(route, status_code, hour):
     The list consists of all days since we started seeing this particular
     request sorted by least recent to most recent.
     """
-    log_hours = r.zrange("route:%s:status:%s:hour:%02d:log_hours_seen" %
-                         (route, status_code, hour), 0, -1)
+    log_hours = r.zrange("hour:%02d:log_hours_seen" % hour, 0, -1)
     hourly_responses = []
+    seen_instance = False
     for log_hour in log_hours:
         count = get_responses_count(route, status_code, log_hour)
-        hourly_responses.append(count)
+        if not seen_instance and count == 0:
+            # Ignore all of the earliest requests with a count of 0.
+            continue
 
+        seen_instance = True
+        hourly_responses.append(count)
     return hourly_responses
 
 
@@ -808,6 +812,7 @@ def record_log_data_received(log_hour):
     """Track that we've received error data from the GAE logs (via BigQuery)."""
     r.set("available_logs:%s" % log_hour, 1)
     r.expire("available_logs:%s" % log_hour, KEY_EXPIRY_SECONDS)
+    r.zadd("hour:%s:log_hours_seen" % log_hour.split('_')[1], 1, log_hour)
 
 
 def check_log_data_received(log_hour):
@@ -878,16 +883,7 @@ def record_occurrences_from_requests(log_hour, status, route, num_seen):
 
     num_seen: The number of times the request was seen.
     """
-    hour = log_hour.split("_")[-1]
-
-    if r.zrank("route:%s:status:%s:hour:%s:log_hours_seen" %
-               (route, status, hour), log_hour) is not None:
-        # We've already seen this specific log hour so don't update redis.
-        return
-
     r.sadd("seen_routes", route)
     r.sadd("seen_statuses", status)
-    r.zadd("route:%s:status:%s:hour:%s:log_hours_seen" %
-           (route, status, hour), 1, log_hour)
-    r.incrby("route:%s:status:%s:log_hour:%s:num_seen" %
-             (route, status, log_hour), num_seen)
+    r.set("route:%s:status:%s:log_hour:%s:num_seen" %
+          (route, status, log_hour), num_seen)

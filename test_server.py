@@ -390,6 +390,7 @@ class RequestMonitorTest(unittest.TestCase):
                 ]
             }]
             self.bq.requests_from_bigquery("201001%02d_01" % i)
+            models.record_log_data_received("201001%02d_01" % i)
 
         self.app.get("/update_thresholds")
 
@@ -402,6 +403,7 @@ class RequestMonitorTest(unittest.TestCase):
             ]
         }]
         self.bq.requests_from_bigquery("20100120_01")
+        models.record_log_data_received("20100120_01")
 
         ret = self.app.get("/anomalies/20100120_01")
         ret = json.loads(ret.data)
@@ -459,6 +461,7 @@ class RequestMonitorTest(unittest.TestCase):
                     ]
                 }]
                 self.bq.requests_from_bigquery("2010%02d%02d_01" % (i, j))
+                models.record_log_data_received("2010%02d%02d_01" % (i, j))
 
         self.app.get("/update_thresholds")
 
@@ -472,6 +475,7 @@ class RequestMonitorTest(unittest.TestCase):
             ]
         }]
         self.bq.requests_from_bigquery("20110101_01")
+        models.record_log_data_received("20110101_01")
         ret = self.app.get("/anomalies/20110101_01")
         ret = json.loads(ret.data)
 
@@ -503,6 +507,7 @@ class RequestMonitorTest(unittest.TestCase):
                 ]
             }]
             self.bq.requests_from_bigquery("201001%02d_01" % i)
+            models.record_log_data_received("201001%02d_01" % i)
 
         self.app.get("/update_thresholds")
 
@@ -515,6 +520,7 @@ class RequestMonitorTest(unittest.TestCase):
         # gets called. Note that this did not apply to other tests since we
         # only called requests_from_bigquery on specific dates.
         self.bq.requests_from_bigquery("20100111_01")
+        models.record_log_data_received("20100111_01")
         ret = self.app.get("/anomalies/20100111_01")
         ret = json.loads(ret.data)
 
