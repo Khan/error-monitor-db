@@ -211,10 +211,26 @@ class BigQuery(object):
             ('SELECT COUNT(*), status, elog_url_route '
              'FROM [logs_hourly.requestlogs_%s] '
              'WHERE elog_url_route IS NOT NULL '
-             'GROUP BY status, elog_url_route HAVING COUNT(*) > 1') % log_hour)
+             'GROUP BY status, elog_url_route HAVING COUNT(*) > 0') % log_hour)
 
         for record in records:
             num_seen, status, route = [v['v'] for v in record['f']]
+            models.record_occurrences_from_requests(log_hour, status,
+                                                    route, num_seen)
+
+    def daily_requests_from_bigquery(self, date):
+        print "Fetching daily requests for %s" % date
+        records = self.run_query(
+            ('SELECT COUNT(*), HOUR(start_time_timestamp) AS log_hour, '
+             'status, elog_url_route '
+             'FROM [logs.requestlogs_%s] '
+             'WHERE elog_url_route IS NOT NULL '
+             'GROUP BY log_hour, status, elog_url_route HAVING COUNT(*) > 0') %
+             date)
+
+        for record in records:
+            num_seen, hour, status, route = [v['v'] for v in record['f']]
+            log_hour = "%s_%02d" % (date, int(hour))
             models.record_occurrences_from_requests(log_hour, status,
                                                     route, num_seen)
 
@@ -226,6 +242,32 @@ def _urlize(error_key):
 
 def import_logs(date_str):
     bq = BigQuery()
+
+    if not models.check_log_data_received(date_str + "_00"):
+        # We aren't partially through fetching hourly request logs so try
+        # to fetch all daily logs in one go.
+        try:
+            bq.daily_requests_from_bigquery(date_str)
+            for hour in xrange(24):
+                # Record successful receipt of all hours that day.
+                log_hour = "%s_%02d" % (date_str, hour)
+                models.record_log_data_received(log_hour)
+
+            print "Done fetching logs."
+            return
+
+        except TableNotFoundError:
+            print "BigQuery table for %s is not available yet." % date_str
+
+        except UnknownBigQueryError, e:
+            logging.fatal("BigQuery error: %s" % pprint.pformat(e.error))
+
+        except MissingBigQueryCredentialsError:
+            logging.fatal("Credentials have been revoked or expired, "
+                          "please re-run the application manually to "
+                          "re-authorize")
+
+    print "Trying to fetch hourly logs."
     for hour in xrange(0, 24):
         log_hour = "%s_%02d" % (date_str, hour)
 
@@ -246,9 +288,9 @@ def import_logs(date_str):
             logging.fatal("BigQuery error: %s" % pprint.pformat(e.error))
 
         except MissingBigQueryCredentialsError:
-            logging.fatal("Credentials have been revoked or expired, "
-                          "please re-run the application manually to "
-                          "re-authorize")
+            # The error should have already been logged while trying to fetch
+            # daily logs so just pass.
+            pass
 
     print "Done fetching logs."
 

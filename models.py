@@ -753,24 +753,6 @@ def get_statuses():
     return list(r.smembers("seen_statuses"))
 
 
-def get_thresholds(route, status_code, hour):
-    """Get the anomaly threshold for the given request at the given hour."""
-    result_str = r.get("route:%s:status:%s:hour:%02d:thresholds" %
-                       (route, status_code, hour))
-    if result_str is None:
-        # The thresholds weren't set yet so return relatively low bounds.
-        return 0, 20
-    else:
-        return json.loads(result_str)
-
-
-def set_thresholds(route, status_code, hour,
-                   lower_bound, upper_bound):
-    """Set the anomaly threshold for the given request at the given hour."""
-    r.set("route:%s:status:%s:hour:%02d:thresholds" %
-          (route, status_code, hour), json.dumps((lower_bound, upper_bound)))
-
-
 def get_responses_count(route, status_code, log_hour):
     """Get the number of requests for a specific date."""
     count = r.get("route:%s:status:%s:log_hour:%s:num_seen" %
@@ -783,13 +765,14 @@ def get_responses_count(route, status_code, log_hour):
     return count
 
 
-def get_hourly_responses_count(route, status_code, hour):
+def get_hourly_responses_count(route, status_code):
     """Get a list of counts of the number of requests made for a specific hour.
 
     The list consists of all days since we started seeing this particular
     request sorted by least recent to most recent.
     """
-    log_hours = r.zrange("hour:%02d:log_hours_seen" % hour, 0, -1)
+    log_hours = r.zrange("available_logs", 0, -1)
+    dates_seen = []
     hourly_responses = []
     seen_instance = False
     for log_hour in log_hours:
@@ -797,10 +780,11 @@ def get_hourly_responses_count(route, status_code, hour):
         if not seen_instance and count == 0:
             # Ignore all of the earliest requests with a count of 0.
             continue
-
         seen_instance = True
+        dates_seen.append(log_hour)
         hourly_responses.append(count)
-    return hourly_responses
+
+    return dates_seen, hourly_responses
 
 
 ####
@@ -810,14 +794,12 @@ def get_hourly_responses_count(route, status_code, hour):
 
 def record_log_data_received(log_hour):
     """Track that we've received error data from the GAE logs (via BigQuery)."""
-    r.set("available_logs:%s" % log_hour, 1)
-    r.expire("available_logs:%s" % log_hour, KEY_EXPIRY_SECONDS)
-    r.zadd("hour:%s:log_hours_seen" % log_hour.split('_')[1], 1, log_hour)
+    r.zadd("available_logs", 1, log_hour)
 
 
 def check_log_data_received(log_hour):
     """Check whether we have error data from BigQuery for the given hour."""
-    return r.get("available_logs:%s" % log_hour) is not None
+    return r.zrank("available_logs", log_hour) is not None
 
 
 def record_occurrence_from_errors(version, log_hour, status, level, resource,

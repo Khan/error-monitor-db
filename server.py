@@ -9,6 +9,7 @@ import logging.handlers
 import numpy
 import redis
 
+import detect_anomalies
 import models
 
 app = flask.Flask("Khan Academy Error Monitor")
@@ -189,6 +190,14 @@ def monitor():
     return "OK"
 
 
+@app.route("/update_thresholds", methods=["get"])
+def update_thresholds():
+    for route in models.get_routes():
+        # TODO(karlkrauth): We might want to estimate thresholds
+        # weekly if doing anomaly detection every hour is too costly.
+        pass
+
+
 @app.route("/anomalies/<log_hour>", methods=["get"])
 def recent_anomalies(log_hour):
     """Get anomalies that happened at the given date formated as YYYYMMDD_HH.
@@ -198,44 +207,37 @@ def recent_anomalies(log_hour):
     """
     routes = models.get_routes()
     anomalies = []
-    hour = int(log_hour.split("_")[1])
-
     for route in routes:
-        responses_count = models.get_responses_count(route, HTTP_OK_CODE,
-                                                     log_hour)
-        lower_bound, upper_bound = models.get_thresholds(route, HTTP_OK_CODE,
-                                                         hour)
-        if responses_count < lower_bound or responses_count > upper_bound:
+        hours_seen, responses_count = models.get_hourly_responses_count(
+            route, HTTP_OK_CODE)
+
+        # Ensure that the time series is divisible by the frequency by
+        # cutting off the first few elements.
+        hours_seen = hours_seen[len(hours_seen) % 168:]
+        responses_count = responses_count[len(responses_count) % 168:]
+
+        log_hour_index = -1
+        for i in xrange(len(hours_seen)):
+            if hours_seen[i] == log_hour:
+                log_hour_index = i
+
+        if log_hour_index == -1 or log_hour_index == 0:
+            # Either the log hour wasn't recorded or it was the first
+            # request so just skip it.
+            continue
+
+        anomaly_scores = detect_anomalies.get_anomalies(responses_count)
+        if anomaly_scores[log_hour_index - 1] != 0:
             anomalies.append({
                 "route": route,
                 "status": HTTP_OK_CODE,
-                "count": responses_count,
-                "lower_bound": lower_bound,
-                "upper_bound": upper_bound,
+                "count": responses_count[log_hour_index],
+                "anomaly_score": anomaly_scores[log_hour_index - 1],
             })
 
     return json.dumps({
         "anomalies": anomalies
     })
-
-
-@app.route("/update_thresholds", methods=["get"])
-def update_threshold():
-    """Update the thresholds that determine whether the number of requests on
-    each routes are anomalous. This endpoint does not need to be called every
-    time /recent_anomalies gets called but can instead be calculated at less
-    regular time intervals.
-    """
-    routes = models.get_routes()
-    for route in routes:
-        for hour in xrange(24):
-            responses_count = models.get_hourly_responses_count(
-                route, HTTP_OK_CODE, hour)
-            lower_bound, upper_bound = _compute_cutoffs(responses_count)
-            models.set_thresholds(route, HTTP_OK_CODE, hour,
-                                  lower_bound, upper_bound)
-
-    return flask.Response('Success', mimetype='text/plain')
 
 
 @app.route("/errors/<version_id>/monitor/<int:minute>", methods=["get"])
