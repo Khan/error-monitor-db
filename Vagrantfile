@@ -16,7 +16,9 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
   config.vm.network :forwarded_port, host: 7000, guest: 9340
 
   config.vm.provider "virtualbox" do |v|
-    v.memory = 2048
+    v.customize ["modifyvm", :id, "--ioapic", "on"  ]
+    v.customize ["modifyvm", :id, "--cpus"  , "4"   ]
+    v.customize ["modifyvm", :id, "--memory", "2048"]
     v.customize ["setextradata", :id, "VBoxInternal2/SharedFoldersEnableSymlinksCreate/v-root", "1"]
   end
 

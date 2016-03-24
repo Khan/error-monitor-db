@@ -285,9 +285,9 @@ def import_logs(date_str):
             logging.fatal("BigQuery error: %s" % pprint.pformat(e.error))
 
         except MissingBigQueryCredentialsError:
-            # The error should have already been logged while trying to fetch
-            # hourly logs so just pass.
-            pass
+            logging.fatal("Credentials have been revoked or expired, "
+                          "please re-run the application manually to "
+                          "re-authorize")
 
     print "Done fetching logs."
 

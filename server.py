@@ -2,8 +2,6 @@
 import argparse
 import json
 import math
-import multiprocessing.pool
-import threading
 
 import flask
 import logging
@@ -202,46 +200,20 @@ def update_thresholds():
 
 @app.route("/anomalies/<log_hour>", methods=["get"])
 def recent_anomalies(log_hour):
-    """Get anomalies that happened at the given date formated as YYYYMMDD_HH.
-
-    An anomaly is detected when the number of responses on a specific route
-    exceeds the threshold set by /update_thresholds.
-    """
+    """Get anomalies that happened at the date formatted as YYYYMMDD_HH."""
     routes = models.get_routes()
-    lock = threading.Lock()
+    anomaly_scores = detect_anomalies.find_anomalies_on_routes(log_hour,
+                                                               routes)
     anomalies = []
-
-    def find_anomalies_on_route(route):
-        hours_seen, responses_count = models.get_hourly_responses_count(
-            route, HTTP_OK_CODE)
-
-        # Ensure that the time series is divisible by the frequency by
-        # cutting off the first few elements.
-        hours_seen = hours_seen[len(hours_seen) % 168:]
-        responses_count = responses_count[len(responses_count) % 168:]
-
-        log_hour_index = -1
-        for i in xrange(len(hours_seen)):
-            if hours_seen[i] == log_hour:
-                log_hour_index = i
-
-        if log_hour_index == -1 or log_hour_index == 0:
-            # Either the log hour wasn't recorded or it was the first
-            # request so just skip it.
-            return
-
-        anomaly_scores = detect_anomalies.get_anomalies(responses_count)
-        if anomaly_scores[log_hour_index - 1] != 0:
-            with lock:
-                anomalies.append({
-                    "route": route,
-                    "status": HTTP_OK_CODE,
-                    "count": responses_count[log_hour_index],
-                    "anomaly_score": anomaly_scores[log_hour_index - 1],
-                })
-
-    thread_pool = multiprocessing.pool.ThreadPool(processes=8)
-    thread_pool.map(find_anomalies_on_route, routes)
+    for i in xrange(len(routes)):
+        if anomaly_scores[i] != 0:
+            anomalies.append({
+                "route": routes[i],
+                "status": HTTP_OK_CODE,
+                "count": models.get_responses_count(routes[i], HTTP_OK_CODE,
+                                                    log_hour),
+                "anomaly_score": anomaly_scores[i],
+            })
 
     return json.dumps({
         "anomalies": anomalies
