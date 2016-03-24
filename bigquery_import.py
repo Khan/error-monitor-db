@@ -243,31 +243,6 @@ def _urlize(error_key):
 def import_logs(date_str):
     bq = BigQuery()
 
-    if not models.check_log_data_received(date_str + "_00"):
-        # We aren't partially through fetching hourly request logs so try
-        # to fetch all daily logs in one go.
-        try:
-            bq.daily_requests_from_bigquery(date_str)
-            for hour in xrange(24):
-                # Record successful receipt of all hours that day.
-                log_hour = "%s_%02d" % (date_str, hour)
-                models.record_log_data_received(log_hour)
-
-            print "Done fetching logs."
-            return
-
-        except TableNotFoundError:
-            print "BigQuery table for %s is not available yet." % date_str
-
-        except UnknownBigQueryError, e:
-            logging.fatal("BigQuery error: %s" % pprint.pformat(e.error))
-
-        except MissingBigQueryCredentialsError:
-            logging.fatal("Credentials have been revoked or expired, "
-                          "please re-run the application manually to "
-                          "re-authorize")
-
-    print "Trying to fetch hourly logs."
     for hour in xrange(0, 24):
         log_hour = "%s_%02d" % (date_str, hour)
 
@@ -288,8 +263,30 @@ def import_logs(date_str):
             logging.fatal("BigQuery error: %s" % pprint.pformat(e.error))
 
         except MissingBigQueryCredentialsError:
+            logging.fatal("Credentials have been revoked or expired, "
+                          "please re-run the application manually to "
+                          "re-authorize")
+
+    if not models.check_log_data_received(date_str + "_00"):
+        print "Trying to fetch daily logs."
+        # We aren't partially through fetching hourly request logs so try
+        # to fetch all daily logs in one go.
+        try:
+            bq.daily_requests_from_bigquery(date_str)
+            for hour in xrange(24):
+                # Record successful receipt of all hours that day.
+                log_hour = "%s_%02d" % (date_str, hour)
+                models.record_log_data_received(log_hour)
+
+        except TableNotFoundError:
+            print "BigQuery table for %s is not available yet." % date_str
+
+        except UnknownBigQueryError, e:
+            logging.fatal("BigQuery error: %s" % pprint.pformat(e.error))
+
+        except MissingBigQueryCredentialsError:
             # The error should have already been logged while trying to fetch
-            # daily logs so just pass.
+            # hourly logs so just pass.
             pass
 
     print "Done fetching logs."

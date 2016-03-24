@@ -2,6 +2,8 @@
 import argparse
 import json
 import math
+import multiprocessing.pool
+import threading
 
 import flask
 import logging
@@ -206,8 +208,10 @@ def recent_anomalies(log_hour):
     exceeds the threshold set by /update_thresholds.
     """
     routes = models.get_routes()
+    lock = threading.Lock()
     anomalies = []
-    for route in routes:
+
+    def find_anomalies_on_route(route):
         hours_seen, responses_count = models.get_hourly_responses_count(
             route, HTTP_OK_CODE)
 
@@ -224,16 +228,20 @@ def recent_anomalies(log_hour):
         if log_hour_index == -1 or log_hour_index == 0:
             # Either the log hour wasn't recorded or it was the first
             # request so just skip it.
-            continue
+            return
 
         anomaly_scores = detect_anomalies.get_anomalies(responses_count)
         if anomaly_scores[log_hour_index - 1] != 0:
-            anomalies.append({
-                "route": route,
-                "status": HTTP_OK_CODE,
-                "count": responses_count[log_hour_index],
-                "anomaly_score": anomaly_scores[log_hour_index - 1],
-            })
+            with lock:
+                anomalies.append({
+                    "route": route,
+                    "status": HTTP_OK_CODE,
+                    "count": responses_count[log_hour_index],
+                    "anomaly_score": anomaly_scores[log_hour_index - 1],
+                })
+
+    thread_pool = multiprocessing.pool.ThreadPool(processes=8)
+    thread_pool.map(find_anomalies_on_route, routes)
 
     return json.dumps({
         "anomalies": anomalies
