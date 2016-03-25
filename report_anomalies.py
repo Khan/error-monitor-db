@@ -73,7 +73,6 @@ if __name__ == "__main__":
     one_day_ago_str = one_day_ago.strftime("%Y%m%d_%H")
 
     parser = argparse.ArgumentParser()
-    # TODO(csilvers): warn if start_date is more than 7 days ago.
     parser.add_argument("-d", "--date",
                         default=now_str,
                         help=("Date (in UTC) to start processing error info, "

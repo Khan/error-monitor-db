@@ -5,11 +5,16 @@
 We already export all the AppEngine server logs to BigQuery once an hour,
 into a dataset in the format "logs_hourly.requestlogs_YYYYMMDD_HH". On the
 error monitor, we run a cron job that executes this file to scrape these logs
-as they become available with a simple query (in `logs_from_bigquery`) that
+as they become available with a simple query (in `errors_from_bigquery`) that
 just filters for log lines  of level ERROR or CRITICAL. The errors are then
 stored in Redis by version and error key for later reference.
 
-To see how errors are stored, see models.py.
+We also save the number of HTTP response codes received on specific routes
+to be used in the detection of anomalies. We first try to pull in hourly logs
+(`requests_from_bigquery`), and if those aren't available we try to pull in
+daily logs (`daily_requests_from_bigquery`).
+
+To see how errors and requests are stored, see models.py.
 
 There is a dependency here that are not included in the repo for security
 reasons:
@@ -152,13 +157,10 @@ class BigQuery(object):
             return query_response['rows']
 
     def errors_from_bigquery(self, log_hour):
-        """Retrieve logs for the specified hour from BigQuery.
+        """Retrieve errors for the specified hour from BigQuery.
 
         'log_hour' is the date portion of the request log dataset name, in the
         format YYYYMMDD_HH, in UTC time.
-
-        If the logs have already been retrieved and the errors are in Redis,
-        don't re-fetch the logs.
 
         In case of an error, raises one of the exceptions
         at the top of the file.
@@ -206,6 +208,11 @@ class BigQuery(object):
         return (new_keys, old_keys - new_keys)
 
     def requests_from_bigquery(self, log_hour):
+        """Retrieve requests for the specified hour from BigQuery.
+
+        'log_hour' is the date portion of the request log dataset name, in the
+        format YYYYMMDD_HH, in UTC time.
+        """
         print "Fetching hourly requests for %s" % log_hour
         records = self.run_query(
             ('SELECT COUNT(*), status, elog_url_route '
@@ -219,6 +226,11 @@ class BigQuery(object):
                                                     route, num_seen)
 
     def daily_requests_from_bigquery(self, date):
+        """Retrieve requests for the specified day from BigQuery.
+
+        'date' is the date portion of the request log dataset name, in the
+        format YYYYMMDD, in UTC time.
+        """
         print "Fetching daily requests for %s" % date
         records = self.run_query(
             ('SELECT COUNT(*), HOUR(start_time_timestamp) AS log_hour, '
@@ -241,6 +253,11 @@ def _urlize(error_key):
 
 
 def import_logs(date_str):
+    """Import both the request and error logs from bigquery.
+
+    If the logs have already been retrieved and the is in Redis,
+    don't re-fetch the logs.
+    """
     bq = BigQuery()
 
     for hour in xrange(0, 24):
@@ -270,8 +287,10 @@ def import_logs(date_str):
     if not models.check_log_data_received(date_str + "_00"):
         print "Trying to fetch daily logs."
         # We aren't partially through fetching hourly request logs so try
-        # to fetch all daily logs in one go.
+        # to fetch all daily request logs in one go.
         try:
+            # We don't fetch error logs since this case should only happen
+            # when logs are too old to be counted by the error monitoring.
             bq.daily_requests_from_bigquery(date_str)
             for hour in xrange(24):
                 # Record successful receipt of all hours that day.

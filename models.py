@@ -766,10 +766,12 @@ def get_responses_count(route, status_code, log_hour):
 
 
 def get_hourly_responses_count(route, status_code):
-    """Get a list of counts of the number of requests made for a specific hour.
+    """Get a list of hours and a list of counts for a specific request.
 
-    The list consists of all days since we started seeing this particular
-    request sorted by least recent to most recent.
+    The first list consists of all timestamps since we started seeing this
+    particular request, the second list consists of the number of times
+    we have seen a specific response occur for the corresponding log hour.
+    Both lists are sorted from least recent to most recent.
     """
     log_hours = r.zrange("available_logs", 0, -1)
     dates_seen = []
