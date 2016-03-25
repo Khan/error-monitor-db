@@ -251,7 +251,7 @@ def import_logs(date_str):
                 continue
 
             bq.requests_from_bigquery(log_hour)
-            # bg.errors_from_bigquery(log_hour)
+            bq.errors_from_bigquery(log_hour)
             models.record_log_data_received(log_hour)
 
         except TableNotFoundError:
