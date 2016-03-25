@@ -1,3 +1,17 @@
+"""R translation functions for anomaly detection.
+
+This module is little more than a set of functions to allow multiprocess
+access to the R robust anomaly detection (RAD) code by Netflix.
+
+More details on the implementation of RAD can be found at the following
+Github repository:
+https://github.com/Netflix/Surus
+
+The following paper provides details on the method underlying RAD, entitled
+robust principle component analysis (RPCA):
+https://statweb.stanford.edu/~candes/papers/RobustPCA.pdf
+"""
+
 import multiprocessing
 
 import rpy2.rinterface
@@ -7,17 +21,24 @@ import models
 import server
 
 robjects.r('suppressMessages(require(RAD))')
-rpca = robjects.r('AnomalyDetection.rpca')
+
+# See Netflix/Surus/resources/R/RAD/R/anomaly_detection.R for
+# details on the R RPCA function.
+r_rpca = robjects.r('AnomalyDetection.rpca')
 
 NUM_HOURS_PER_WEEK = 7 * 24
 
 
-def get_anomalies(time_series, frequency):
+def rpca(time_series, frequency):
+    """A simple function that calls into the RPCA R code.
+
+    Returns a list of sparse outliers.
+    """
     # Convert our time series to work with R.
     time_series = robjects.FloatVector(time_series)
 
     try:
-        anomalies = rpca(time_series, frequency=frequency)[2]
+        anomalies = r_rpca(time_series, frequency=frequency)[2]
     except rpy2.rinterface.RRuntimeError:
         # The time series was too small to detect anomalies.
         anomalies = len(time_series) * [0.0]
@@ -26,6 +47,16 @@ def get_anomalies(time_series, frequency):
 
 
 def find_anomalies_on_routes(log_hour, routes):
+    """Find any unusual 200 request counts on the given routes at an hour.
+
+    'log_hour' is a timestamp formatted as "YYYYMMDD_HH" in UTC.
+    'routes' is a list of all routes that are to be inspected.
+
+    The function returns an array of floats where a positive number indicates
+    an unusually high number of 200 responses and a negative number represents
+    an unusually low number. The higher the magnitude, the more pronounced the
+    anomaly.
+    """
     anomalies = multiprocessing.Array('d', len(routes), lock=True)
 
     def check_anomaly(index):
@@ -50,12 +81,12 @@ def find_anomalies_on_routes(log_hour, routes):
             anomalies[index] = 0
             return
 
-        anomaly_scores = get_anomalies(responses_count, NUM_HOURS_PER_WEEK)
+        anomaly_scores = rpca(responses_count, NUM_HOURS_PER_WEEK)
         if anomaly_scores[log_hour_index - 1] != 0:
             anomalies[index] = anomaly_scores[log_hour_index - 1]
 
     # We fork new processes for each run of RAD instead of threads due to
-    # a limitation of rpy2.
+    # a limitation of rpy2 which forbids multi-threaded access of the R env.
     indices = [i for i in xrange(len(routes))]
     multiprocess_map(check_anomaly, indices)
 
@@ -63,7 +94,9 @@ def find_anomalies_on_routes(log_hour, routes):
 
 
 def multiprocess_wrapper(func, input_queue, output_queue):
-    """Taken from: http://stackoverflow.com/a/16071616"""
+    """A simple wrapper function used by multiprocess_map.
+
+    Taken from: http://stackoverflow.com/a/16071616"""
     while True:
         index, args = input_queue.get()
         if index is None:
@@ -74,7 +107,14 @@ def multiprocess_wrapper(func, input_queue, output_queue):
 
 def multiprocess_map(func, args_list,
                      num_processes=multiprocessing.cpu_count()):
-    """Taken from: http://stackoverflow.com/a/16071616"""
+    """Fork multiple processes and map a function across the processes.
+
+    'func' is some arbitrary function that takes any element in args_list
+    as its paremeter.
+    'args_list' is a list of parameters to be given to func.
+    'num_processes' is the number of processes to fork.
+
+    Taken from: http://stackoverflow.com/a/16071616"""
     input_queue = multiprocessing.Queue(1)
     output_queue = multiprocessing.Queue()
     processes = [multiprocessing.Process(
