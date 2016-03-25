@@ -12,7 +12,7 @@ rpca = robjects.r('AnomalyDetection.rpca')
 NUM_HOURS_PER_WEEK = 7 * 24
 
 
-def get_anomalies(time_series, frequency=NUM_HOURS_PER_WEEK):
+def get_anomalies(time_series, frequency):
     # Convert our time series to work with R.
     time_series = robjects.FloatVector(time_series)
 
@@ -50,7 +50,7 @@ def find_anomalies_on_routes(log_hour, routes):
             anomalies[index] = 0
             return
 
-        anomaly_scores = get_anomalies(responses_count)
+        anomaly_scores = get_anomalies(responses_count, NUM_HOURS_PER_WEEK)
         if anomaly_scores[log_hour_index - 1] != 0:
             anomalies[index] = anomaly_scores[log_hour_index - 1]
 

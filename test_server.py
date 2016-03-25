@@ -6,6 +6,7 @@ import json
 import unittest
 
 import bigquery_import
+import detect_anomalies
 import models
 import server
 
@@ -347,6 +348,10 @@ class RequestMonitorTest(unittest.TestCase):
         models.r.scan = lambda cursor, match, count: (
                 (0, models.r.keys(match)))
 
+        # Set the number of hours per week to be 1 so we don't have to
+        # generate large time series.
+        detect_anomalies.NUM_HOURS_PER_WEEK = 1
+
         # Get a test app we can make requests against
         self.app = server.app.test_client()
         self.app.debug = True
@@ -361,6 +366,8 @@ class RequestMonitorTest(unittest.TestCase):
         # Restore mocked Redis
         models.r.flushall()
         models.r = self.old_r
+        # Restore the number of hours per week.
+        detect_anomalies.NUM_HOURS_PER_WEEK = 168
 
     def test_single_request(self):
         # Record a single request.
@@ -373,7 +380,6 @@ class RequestMonitorTest(unittest.TestCase):
         }]
         self.bq.requests_from_bigquery("20100101_01")
 
-        self.app.get("/update_thresholds")
         ret = self.app.get("/anomalies/20100101_01")
         ret = json.loads(ret.data)
 
@@ -391,8 +397,6 @@ class RequestMonitorTest(unittest.TestCase):
             }]
             self.bq.requests_from_bigquery("201001%02d_01" % i)
             models.record_log_data_received("201001%02d_01" % i)
-
-        self.app.get("/update_thresholds")
 
         # Record a sudden steep drop in requests.
         self.query_response = [{
@@ -426,19 +430,20 @@ class RequestMonitorTest(unittest.TestCase):
                     ]
                 }]
                 self.bq.requests_from_bigquery("2010%02d%02d_01" % (i, j))
+                models.record_log_data_received("2010%02d%02d_01" % (i, j))
 
         # Record multiple relatively steep drops in requests.
         for i in xrange(1, 4):
             self.query_response = [{
                 "f": [
-                    {"v": 800 + i},
+                    {"v": 800 - 100 * i},
                     {"v": 200},
                     {"v": "/path"},
                 ]
             }]
             self.bq.requests_from_bigquery("201101%02d_01" % i)
+            models.record_log_data_received("201101%02d_01" % i)
 
-        self.app.get("/update_thresholds")
         for i in xrange(1, 4):
             ret = self.app.get("/anomalies/201101%02d_01" % i)
             ret = json.loads(ret.data)
@@ -447,7 +452,7 @@ class RequestMonitorTest(unittest.TestCase):
             anomaly = ret["anomalies"][0]
             self.assertEqual(anomaly["route"], "/path")
             self.assertEqual(anomaly["status"], 200)
-            self.assertEqual(anomaly["count"], 800 + i)
+            self.assertEqual(anomaly["count"], 800 - 100 * i)
 
     def test_increasing_requests(self):
         # Simulate a path that gets more requests over time.
@@ -463,13 +468,11 @@ class RequestMonitorTest(unittest.TestCase):
                 self.bq.requests_from_bigquery("2010%02d%02d_01" % (i, j))
                 models.record_log_data_received("2010%02d%02d_01" % (i, j))
 
-        self.app.get("/update_thresholds")
-
-        # Now record a day with slightly fewer requests. This shouldn't raise
-        # an anomaly
+        # Now record a day with slightly fewer requests than expected.
+        # This shouldn't raise an anomaly
         self.query_response = [{
             "f": [
-                {"v": 10800},
+                {"v": 11090},
                 {"v": 200},
                 {"v": "/path"},
             ]
@@ -491,6 +494,7 @@ class RequestMonitorTest(unittest.TestCase):
             ]
         }]
         self.bq.requests_from_bigquery("20110102_01")
+        models.record_log_data_received("20110102_01")
         ret = self.app.get("/anomalies/20110102_01")
         ret = json.loads(ret.data)
 
@@ -508,8 +512,6 @@ class RequestMonitorTest(unittest.TestCase):
             }]
             self.bq.requests_from_bigquery("201001%02d_01" % i)
             models.record_log_data_received("201001%02d_01" % i)
-
-        self.app.get("/update_thresholds")
 
         # Now record a day where the request does not appear in logs.
         self.query_response = []
