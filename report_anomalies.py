@@ -35,16 +35,13 @@ def _slack_anomaly_attachment(anomaly_info):
     """Return an attachment field with anomaly information for use in slack."""
     return {
         'text': ('*Anomaly on route %s with status code %d*\n'
-                 'Expected between %lf and %lf requests but got %d requests.' %
+                 'Got %d requests which gave an anomaly score of %lf.' %
                  (anomaly_info["route"], anomaly_info["status"],
-                  anomaly_info["lower_bound"], anomaly_info["upper_bound"],
-                  anomaly_info["count"])),
+                  anomaly_info["count"], anomaly_info["anomaly_score"])),
         'fallback': ('Anomaly on route %s with status code %d\n'
-                     'Expected between %lf and %lf requests but '
-                     'got %d requests.' %
+                     'Got %d requests which gave an anomaly score of %lf.' %
                      (anomaly_info["route"], anomaly_info["status"],
-                      anomaly_info["lower_bound"], anomaly_info["upper_bound"],
-                      anomaly_info["count"])),
+                      anomaly_info["count"], anomaly_info["anomaly_score"])),
         'color': 'danger',
         'mrkdwn_in': ['text'],
     }
@@ -52,6 +49,10 @@ def _slack_anomaly_attachment(anomaly_info):
 
 def send_alerts_for_anomalies(hostport, date, slack_channel):
     anomalies = _fetch_anomaly_json(hostport, date)
+    if not anomalies:
+        print "No anomalies found at %s UTC." % date
+        return
+
     slack_pretext = 'Found %d anomalies at %s UTC.\n' % (len(anomalies), date)
 
     slack_attachments = []

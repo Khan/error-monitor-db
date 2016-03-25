@@ -17,7 +17,7 @@ def get_anomalies(time_series, frequency=NUM_HOURS_PER_WEEK):
     time_series = robjects.FloatVector(time_series)
 
     try:
-        anomalies = rpca(time_series, frequency=frequency, forceDiff=True)[2]
+        anomalies = rpca(time_series, frequency=frequency)[2]
     except rpy2.rinterface.RRuntimeError:
         # The time series was too small to detect anomalies.
         anomalies = len(time_series) * [0.0]

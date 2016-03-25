@@ -116,33 +116,6 @@ def _count_is_elevated_probability(historical_counts, recent_count):
     return (mean, zscore)
 
 
-def _compute_cutoffs(responses_count):
-    # We weight recent historical data heavier than older data.
-    # TODO(karlkrauth): Consider the possibility of looking at weekly
-    # data only.
-    weights = [i + 1 for i in xrange(len(responses_count))]
-
-    if len(responses_count) > 0:
-        mean = numpy.average(responses_count, weights=weights)
-    else:
-        return 0, 20
-
-    if mean < 20:
-        # The mean is really small so make room for a lot of variance.
-        variance = 20 ** 2
-    else:
-        variance = numpy.average(
-            map(lambda x: (x - mean) ** 2, responses_count),
-            weights=numpy.square(weights))
-
-    # Assuming the data is normally distributed, we raise an error if
-    # p(x > y) < 0.995 or p(x < y) < 0.995.
-    lower_bound = mean - 2.58 * numpy.sqrt(variance)
-    upper_bound = mean + 2.58 * numpy.sqrt(variance)
-
-    return lower_bound, upper_bound
-
-
 @app.route("/monitor", methods=["post"])
 def monitor():
     """Accept a snapshot of AppEngine error logs and record them in Redis.
@@ -190,14 +163,6 @@ def monitor():
     return "OK"
 
 
-@app.route("/update_thresholds", methods=["get"])
-def update_thresholds():
-    for route in models.get_routes():
-        # TODO(karlkrauth): We might want to estimate thresholds
-        # weekly if doing anomaly detection every hour is too costly.
-        pass
-
-
 @app.route("/anomalies/<log_hour>", methods=["get"])
 def recent_anomalies(log_hour):
     """Get anomalies that happened at the date formatted as YYYYMMDD_HH."""
@@ -206,7 +171,8 @@ def recent_anomalies(log_hour):
                                                                routes)
     anomalies = []
     for i in xrange(len(routes)):
-        if anomaly_scores[i] != 0:
+        # We only care about significant decreases in 200 responses.
+        if anomaly_scores[i] < -10:
             anomalies.append({
                 "route": routes[i],
                 "status": HTTP_OK_CODE,
