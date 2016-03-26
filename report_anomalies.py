@@ -67,14 +67,12 @@ def send_alerts_for_anomalies(hostport, date, slack_channel):
 if __name__ == "__main__":
     import argparse
 
-    now = datetime.datetime.utcnow()
-    one_day_ago = datetime.datetime.utcnow() - datetime.timedelta(days=1)
-    now_str = now.strftime("%Y%m%d_%H")
-    one_day_ago_str = one_day_ago.strftime("%Y%m%d_%H")
+    last_hour = datetime.datetime.utcnow() - datetime.timedelta(hours=1)
+    last_hour_str = last_hour.strftime("%Y%m%d_%H")
 
     parser = argparse.ArgumentParser()
     parser.add_argument("-d", "--date",
-                        default=now_str,
+                        default=last_hour_str,
                         help=("Date (in UTC) to start processing error info, "
                               "as YYYYMMDD_HH. All output counts will include "
                               "errors from this hour. Default: %(default)s"))
