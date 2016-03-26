@@ -67,6 +67,8 @@ def send_alerts_for_anomalies(hostport, date, slack_channel):
 if __name__ == "__main__":
     import argparse
 
+    # We assume this runs 55 minutes after the hour when all bigquery logs
+    # for the previous hour are assumed to have been fetched.
     last_hour = datetime.datetime.utcnow() - datetime.timedelta(hours=1)
     last_hour_str = last_hour.strftime("%Y%m%d_%H")
 
