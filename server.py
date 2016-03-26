@@ -167,6 +167,7 @@ def monitor():
 def recent_anomalies(log_hour):
     """Get anomalies that happened at the date formatted as YYYYMMDD_HH."""
     routes = models.get_routes()
+    # TODO: If there is no data for this hour we want to send an error.
     anomaly_scores = detect_anomalies.find_anomalies_on_routes(log_hour,
                                                                routes)
     anomalies = []
