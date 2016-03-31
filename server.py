@@ -1,7 +1,7 @@
 """A server that stores & retrieves error information from app logs."""
 import argparse
+import decimal
 import json
-import math
 
 import flask
 import logging
@@ -43,6 +43,41 @@ _ERROR_BLACKLIST_THRESHOLDS = [
 ]
 
 
+def poisson_cdf(actual, mean):
+    """Return p(draw <= actual) when drawing from a poisson distribution.
+
+    That is, we return the probability that we see actual or anything
+    smaller in a random measurement of a variable with a poisson
+    distribution with mean mean.
+
+    (Stolen from statistics_util.py in webapp to avoid a scipy dependency.)
+
+    Arguments:
+       mean: a float.
+    """
+    if actual < 0:
+        return 0.0
+
+    # We use Decimal so that long periods and high numbers of
+    # reports work -- a mean of 746 or higher would cause a zero
+    # to propagate and make us report a probability of 0 even
+    # if the actual probability was almost 1.
+    mean = decimal.Decimal(mean)
+
+    cum_prob = decimal.Decimal(0)
+
+    p = (-mean).exp()
+    cum_prob += p
+    for i in xrange(actual):
+        # We calculate the probability of each lesser value
+        # individually, and sum as we go.
+        p *= mean
+        p /= i + 1
+        cum_prob += p
+
+    return float(cum_prob)
+
+
 def _matches_blacklist(logline, count):
     for error, threshold in _ERROR_BLACKLIST_THRESHOLDS:
         if error in logline and count <= threshold:
@@ -59,12 +94,6 @@ def _version_sort_key(version):
     name.
     """
     return '14' + version if version.startswith('12') else '15' + version
-
-
-def _normal_cdf(x, mean, stddev):
-    """Calculate the cdf for the normal distribution."""
-    # Taken from http://stackoverflow.com/questions/9448246/calculating-probability-of-a-random-variable-in-a-distribution-in-python
-    return 0.5 * (1 + math.erf((x - mean) / stddev / math.sqrt(2)))
 
 
 def _count_is_elevated_probability(historical_counts, recent_count):
@@ -88,11 +117,6 @@ def _count_is_elevated_probability(historical_counts, recent_count):
         # We don't have any history, so we can't make any guesses
         return (0, 0)
 
-    if len(historical_counts) == 1:
-        # We only have one data point, so do a simple threshold check
-        return (historical_counts[0],
-                1 if recent_count > historical_counts[0] else 0)
-
     counts = numpy.array(historical_counts)
     mean = numpy.mean(counts)
 
@@ -100,17 +124,8 @@ def _count_is_elevated_probability(historical_counts, recent_count):
         # If the error count went down, we don't care about the probability
         return (mean, 0)
 
-    # Run a simple z-test by calculating the standard deviation and z-score
-    stdev = numpy.std(counts)
-
-    if stdev < 1:
-        # Avoid a division by zero error
-        return (mean, 1 if recent_count > mean else 0)
-
-    pvalue = (recent_count - mean) / stdev
-    zscore = _normal_cdf(pvalue, 0, 1)
-
-    return (mean, zscore)
+    mean = max(mean, 1)
+    return (mean, poisson_cdf(recent_count, mean))
 
 
 @app.route("/monitor", methods=["post"])
