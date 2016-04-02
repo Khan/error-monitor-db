@@ -6,6 +6,7 @@ import json
 import flask
 import logging
 import logging.handlers
+import math
 import numpy
 import redis
 
@@ -125,7 +126,7 @@ def _count_is_elevated_probability(historical_counts, recent_count):
         return (mean, 0)
 
     mean = max(mean, 1)
-    return (mean, poisson_cdf(recent_count, mean))
+    return (mean, poisson_cdf(int(math.floor(recent_count)), mean))
 
 
 @app.route("/monitor", methods=["post"])
