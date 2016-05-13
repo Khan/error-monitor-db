@@ -32,6 +32,12 @@ _ALERT_BLACKLIST = [
     # OOM's, caused by really big ndb queries maybe?
     'Exceeded soft private memory limit',
 
+    # We'd like to solve these, but don't have a good way how, so there's
+    # no point in alerting about them.
+    # TODO(csilvers): make sure we have good monitoring for them, instead.
+    'The datastore operation timed out,',
+    'The transaction could not be committed. Please try again',
+
     # We see this a lot when trying to send UDP packets to graphite.
     # cf. https://enterprise.google.com/supportcenter/managecases#Case/0016000000QWp9w/4095721
     'ApplicationError: 4 Unknown error',
