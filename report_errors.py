@@ -38,6 +38,7 @@ _ALERT_BLACKLIST = [
     'The datastore operation timed out,',
     'The transaction could not be committed. Please try again',
     'Request was aborted after waiting too long to attempt to service',
+    'server is not responding',
 
     # We see this a lot when trying to send UDP packets to graphite.
     # cf. https://enterprise.google.com/supportcenter/managecases#Case/0016000000QWp9w/4095721
