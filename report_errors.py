@@ -69,8 +69,21 @@ def _fetch_error_json(hostport):
     return json.load(urllib2.urlopen(url))
 
 
-def _send_alerts(slack_attachments, slack_channel):
-    """Send alerts to Slack."""
+def _send_alert_to_asana(error_info):
+    error_name = 'Top Daily Error: ' + str(error_info.title)
+    error_notes = ('*Frequent error (%d occurrences recently):*\n'
+                   'https://www.khanacademy.org/devadmin/errors/%s\n'
+                   '%s (%s)\n This is currently the most frequent error seen'
+                   ' in the webapp logs' %
+                   (error_info.count, error_info.key,
+                    error_info.title, error_info.status))
+
+    asana_project = 'Engineering support'
+    alertlib.Alert(error_notes, summary=error_name, severity=logging.WARNING
+                   ).send_to_asana(project=asana_project)
+
+
+def _send_alerts_to_slack(slack_attachments, slack_channel):
     if slack_channel:
         (alertlib.Alert('', severity=logging.ERROR)
          .send_to_slack(slack_channel, attachments=slack_attachments))
@@ -206,7 +219,8 @@ def send_alerts_for_errors(hostport,
     """Process the error logs between start and end date and send a report.
 
     We always send the report to stdout.  If slack_channel is not None, we
-    send the report there as well.
+    send the report there as well. We also send the top error to Asana
+    as a new task if it does not already exist.
 
     Arguments:
         hostport: the host:port where the error-monitor server is running
@@ -256,7 +270,7 @@ def send_alerts_for_errors(hostport,
     if continuing_msgs:
         error_type = "long-running errors"
         slack_attachments.append(_slack_error_list(continuing_msgs,
-                                                         error_type))
+                                                   error_type))
 
     new_msgs = [e for e in categories['new']
                 if e not in highlighted_errors]
@@ -266,7 +280,13 @@ def send_alerts_for_errors(hostport,
 
     slack_attachments[0]['pretext'] = slack_pretext
     slack_attachments[0]['mrkdwn_in'].append('pretext')
-    _send_alerts(slack_attachments, slack_channel)
+    _send_alerts_to_slack(slack_attachments, slack_channel)
+
+    # Send the top error to asana as a new task. No new task will be created
+    # if an unfinished one with the same name already exists (so that multiple
+    # tasks for the same error are not created).
+    if highlighted_errors:
+        _send_alert_to_asana(highlighted_errors[0])
 
 
 if __name__ == "__main__":
