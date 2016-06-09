@@ -8,14 +8,16 @@ anywhere.
 """
 
 import datetime
+import json
 import logging
-import models
+import urllib2
 
 import alertlib
 
-import detect_anomalies
 
-HTTP_OK_CODE = 200
+def _fetch_anomaly_json(hostport, date):
+    url = 'http://%s/anomalies/%s' % (hostport, date)
+    return json.load(urllib2.urlopen(url))["anomalies"]
 
 
 def _send_alerts(slack_attachments, slack_channel):
@@ -45,29 +47,8 @@ def _slack_anomaly_attachment(anomaly_info):
     }
 
 
-def _get_recent_anomalies(log_hour):
-    """Get anomalies that happened at the date formatted as YYYYMMDD_HH."""
-    routes = models.get_routes()
-    # TODO: If there is no data for this hour we want to send an error.
-    anomaly_scores = detect_anomalies.find_anomalies_on_routes(log_hour,
-                                                               routes)
-    anomalies = []
-    for i in xrange(len(routes)):
-        # We only care about significant decreases in 200 responses.
-        if anomaly_scores[i] < -10:
-            anomalies.append({
-                "route": routes[i],
-                "status": HTTP_OK_CODE,
-                "count": models.get_responses_count(routes[i], HTTP_OK_CODE,
-                                                    log_hour),
-                "anomaly_score": anomaly_scores[i],
-            })
-
-    return anomalies
-
-
-def send_alerts_for_anomalies(date, slack_channel):
-    anomalies = _get_recent_anomalies(date)
+def send_alerts_for_anomalies(hostport, date, slack_channel):
+    anomalies = _fetch_anomaly_json(hostport, date)
     if not anomalies:
         print "No anomalies found at %s UTC." % date
         return
@@ -97,8 +78,12 @@ if __name__ == "__main__":
                         help=("Date (in UTC) to start processing error info, "
                               "as YYYYMMDD_HH. All output counts will include "
                               "errors from this hour. Default: %(default)s"))
+    parser.add_argument("--host",
+                        default="localhost:9340",
+                        help=("Host where the error-monitor-db lives. "
+                              "May include a port too. Default: %(default)s"))
     parser.add_argument("-S", "--slack", dest="slack",
                         help="Slack channel to send the error report to.")
     args = parser.parse_args()
 
-    send_alerts_for_anomalies(args.date, args.slack)
+    send_alerts_for_anomalies(args.host, args.date, args.slack)

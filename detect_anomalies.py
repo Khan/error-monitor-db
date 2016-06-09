@@ -18,7 +18,7 @@ import rpy2.rinterface
 import rpy2.robjects as robjects
 
 import models
-import report_anomalies
+import server
 
 robjects.r('suppressMessages(require(RAD))')
 
@@ -61,7 +61,7 @@ def find_anomalies_on_routes(log_hour, routes):
 
     def check_anomaly(index):
         hours_seen, responses_count = models.get_hourly_responses_count(
-            routes[index], report_anomalies.HTTP_OK_CODE)
+            routes[index], server.HTTP_OK_CODE)
 
         # Ensure that the time series is divisible by the frequency by
         # cutting off the first few elements.

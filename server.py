@@ -10,11 +10,14 @@ import math
 import numpy
 import redis
 
+import detect_anomalies
 import models
 
 app = flask.Flask("Khan Academy Error Monitor")
 
 r = redis.StrictRedis(host='localhost', port=6379, db=0)
+
+HTTP_OK_CODE = 200
 
 # A list of tuples (error, threshold).  We blacklist these errors unless the
 # number of errors per minute is greater than the threshold.  This lets us
@@ -126,7 +129,8 @@ def _count_is_elevated_probability(historical_counts, recent_count):
         return (mean, 0)
 
     mean = max(mean, 1)
-    return (mean, poisson_cdf(int(math.floor(recent_count)), mean))
+    cdf = poisson_cdf(int(math.floor(recent_count)), mean)
+    return (mean, cdf)
 
 
 @app.route("/monitor", methods=["post"])
@@ -174,6 +178,30 @@ def monitor():
     models.record_monitoring_data_received(version, minute)
 
     return "OK"
+
+
+@app.route("/anomalies/<log_hour>", methods=["get"])
+def recent_anomalies(log_hour):
+    """Get anomalies that happened at the date formatted as YYYYMMDD_HH."""
+    routes = models.get_routes()
+    # TODO: If there is no data for this hour we want to send an error.
+    anomaly_scores = detect_anomalies.find_anomalies_on_routes(log_hour,
+                                                               routes)
+    anomalies = []
+    for i in xrange(len(routes)):
+        # We only care about significant decreases in 200 responses.
+        if anomaly_scores[i] < -10:
+            anomalies.append({
+                "route": routes[i],
+                "status": HTTP_OK_CODE,
+                "count": models.get_responses_count(routes[i], HTTP_OK_CODE,
+                                                    log_hour),
+                "anomaly_score": anomaly_scores[i],
+            })
+
+    return json.dumps({
+        "anomalies": anomalies
+    })
 
 
 @app.route("/errors/<version_id>/monitor/<int:minute>", methods=["get"])

@@ -64,6 +64,26 @@ class ErrorMonitorTest(unittest.TestCase):
                     "ip": "1.1.1.1", "route": "/test", "module_id": "default",
                     "message": "Error while parsing directive 2"},
 
+                # This error should be grouped with the previous one
+                {"status": 500, "level": 4, "resource": "/test",
+                    "ip": "1.1.1.1", "route": "/test", "module_id": "default",
+                    "message": "Error while parsing directive 3"},
+
+                # This error should be grouped with the previous one
+                {"status": 500, "level": 4, "resource": "/test",
+                    "ip": "1.1.1.1", "route": "/test", "module_id": "default",
+                    "message": "Error while parsing directive 4"},
+
+                # This error should be grouped with the previous one
+                {"status": 500, "level": 4, "resource": "/test",
+                    "ip": "1.1.1.1", "route": "/test", "module_id": "default",
+                    "message": "Error while parsing directive 5"},
+
+                # This error should be grouped with the previous one
+                {"status": 500, "level": 4, "resource": "/test",
+                    "ip": "1.1.1.1", "route": "/test", "module_id": "default",
+                    "message": "Error while parsing directive 6"},
+
                 # This error will be ignored because the URI is blacklisted
                 {"status": 500, "level": 4,
                     "resource": "/api/internal/translate/lint_poentry",
@@ -81,6 +101,22 @@ class ErrorMonitorTest(unittest.TestCase):
                     "ip": "1.1.1.1", "route": "/luke", "module_id": "default",
                     "message": "Error Help me, Obi Wan Kenobi. Train me in "
                         "ways of the force"},
+                {"status": 500, "level": 4, "resource": "/leia",
+                    "ip": "1.1.1.1", "route": "/luke", "module_id": "default",
+                    "message": "Error Help me, Obi Wan Kenobi. Train me in "
+                        "ways of the schwartz."},
+                {"status": 500, "level": 4, "resource": "/leia",
+                    "ip": "1.1.1.1", "route": "/luke", "module_id": "default",
+                    "message": "Error Help me, Obi Wan Kenobi. Train me in "
+                        "ways of the warts."},
+                {"status": 500, "level": 4, "resource": "/leia",
+                    "ip": "1.1.1.1", "route": "/luke", "module_id": "default",
+                    "message": "Error Help me, Obi Wan Kenobi. Train me in "
+                        "ways of the jorts."},
+                {"status": 500, "level": 4, "resource": "/leia",
+                    "ip": "1.1.1.1", "route": "/luke", "module_id": "default",
+                    "message": "Error Help me, Obi Wan Kenobi. Train me in "
+                        "ways of the basketball courts."},
 
                 # A third unique error, but it's ignored because
                 # singleton errors are ignored.
@@ -99,7 +135,11 @@ class ErrorMonitorTest(unittest.TestCase):
         # The monitor results should also show some new errors.
         rv = self.app.get('/errors/v001/monitor/0?verify_versions=v000')
         # This should show the most recent of the 'directive' errors.
-        assert 'directive 2' in rv.data
+        assert 'directive 6' in rv.data
+        assert 'directive 2' not in rv.data
+        assert 'directive 3' not in rv.data
+        assert 'directive 4' not in rv.data
+        assert 'directive 5' not in rv.data
         assert 'directive 1' not in rv.data
         assert 'blacklisted' not in rv.data
         assert 'Obi Wan' in rv.data
@@ -148,9 +188,43 @@ class ErrorMonitorTest(unittest.TestCase):
                 {"status": 500, "level": 4, "resource": "/leia",
                     "ip": "1.1.1.1", "route": "/leia", "module_id": "default",
                     "message": "Help me, Obi Wan Kenobi. You're my only hope"},
+                {"status": 500, "level": 4, "resource": "/leia",
+                    "ip": "1.1.1.1", "route": "/leia", "module_id": "default",
+                    "message": "Help me, Obi Wan Kenobi. You're my only hope"},
+                {"status": 500, "level": 4, "resource": "/leia",
+                    "ip": "1.1.1.1", "route": "/leia", "module_id": "default",
+                    "message": "Help me, Obi Wan Kenobi. You're my only hope"},
+                {"status": 500, "level": 4, "resource": "/leia",
+                    "ip": "1.1.1.1", "route": "/leia", "module_id": "default",
+                    "message": "Help me, Obi Wan Kenobi. You're my only hope"},
+                {"status": 500, "level": 4, "resource": "/leia",
+                    "ip": "1.1.1.1", "route": "/leia", "module_id": "default",
+                    "message": "Help me, Obi Wan Kenobi. You're my only hope"},
+                {"status": 500, "level": 4, "resource": "/leia",
+                    "ip": "1.1.1.1", "route": "/leia", "module_id": "default",
+                    "message": "Help me, Obi Wan Kenobi. You're my only hope"},
+                {"status": 500, "level": 4, "resource": "/leia",
+                    "ip": "1.1.1.1", "route": "/leia", "module_id": "default",
+                    "message": "Help me, Obi Wan Kenobi. You're my only hope"},
+
 
                 # This is a brand new error. We want to know about it even
                 # though it only happened twice.
+                {"status": 404, "level": 4, "resource": "/home",
+                    "ip": "1.1.1.1", "route": "/home", "module_id": "default",
+                    "message": "There's no place like home."},
+                {"status": 404, "level": 4, "resource": "/home",
+                    "ip": "1.1.1.1", "route": "/home", "module_id": "default",
+                    "message": "There's no place like home."},
+                {"status": 404, "level": 4, "resource": "/home",
+                    "ip": "1.1.1.1", "route": "/home", "module_id": "default",
+                    "message": "There's no place like home."},
+                {"status": 404, "level": 4, "resource": "/home",
+                    "ip": "1.1.1.1", "route": "/home", "module_id": "default",
+                    "message": "There's no place like home."},
+                {"status": 404, "level": 4, "resource": "/home",
+                    "ip": "1.1.1.1", "route": "/home", "module_id": "default",
+                    "message": "There's no place like home."},
                 {"status": 404, "level": 4, "resource": "/home",
                     "ip": "1.1.1.1", "route": "/home", "module_id": "default",
                     "message": "There's no place like home."},
