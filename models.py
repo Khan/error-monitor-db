@@ -133,7 +133,7 @@ ERROR_LEVELS = ["", "", "", "ERROR", "CRITICAL"]
 # URIs to ignore because they spam irrelevant errors
 URI_BLACKLIST = [
     '/api/internal/translate/lint_poentry'
-    ]
+]
 
 # Time delay until we expire keys (one week)
 KEY_EXPIRY_SECONDS = 60 * 60 * 24 * 7
@@ -141,8 +141,8 @@ KEY_EXPIRY_SECONDS = 60 * 60 * 24 * 7
 
 def _get_log_hour_int_expiry():
     """Returns a YYYYMMDDHH int representing the expiration time."""
-    expiry = (datetime.datetime.utcnow()
-        - datetime.timedelta(seconds=KEY_EXPIRY_SECONDS))
+    expiry = (datetime.datetime.utcnow() -
+              datetime.timedelta(seconds=KEY_EXPIRY_SECONDS))
     return int(expiry.strftime('%Y%m%d%H'))
 
 
@@ -174,7 +174,7 @@ def can_connect():
 
 
 ####
-## Caches for error data from Redis.
+# Caches for error data from Redis.
 ####
 
 # A cache of the error def (status, level, title, IDs, etc.)
@@ -220,7 +220,7 @@ def _get_cached_error_def(error_key):
 
 
 ####
-## General-purpose error tracking methods
+# General-purpose error tracking methods
 ####
 
 
@@ -366,15 +366,15 @@ def _parse_message(message, status, level):
     # The title with numbers removed
     id_prefix = str("%s %s " % (status, level))
     error_def['id0'] = (
-            id_prefix + re.sub(r'\d+', '%%', error_def['title']))
+        id_prefix + re.sub(r'\d+', '%%', error_def['title']))
 
     # The first 3 words of the title
     error_def['id1'] = (
-            id_prefix + " ".join(error_def['id0'].split(" ")[2:5]))
+        id_prefix + " ".join(error_def['id0'].split(" ")[2:5]))
 
     # The last 3 words of the title
     error_def['id2'] = (
-            id_prefix + " ".join(error_def['id0'].split(" ")[-3:]))
+        id_prefix + " ".join(error_def['id0'].split(" ")[-3:]))
 
     # Special-cases
     error_def['id3'] = None
@@ -411,7 +411,7 @@ def _parse_message(message, status, level):
     # number changes, so we ignore line numbers when doing the hashing.
     h = md5.md5()
     h.update("|".join("%(filename)s:%(function)s" % s
-                for s in stack))
+                      for s in stack))
     stack_key = h.hexdigest()
 
     return (error_def, stack, stack_key)
@@ -569,7 +569,7 @@ def get_error_extended_information(version, error_key):
 
 
 ####
-## Common error-tracking methods
+# Common error-tracking methods
 ####
 
 def _update_error_details(version, status, level, resource, ip, route,
@@ -665,7 +665,7 @@ def _update_error_details(version, status, level, resource, ip, route,
 
 
 ####
-## Methods specific to deploy-time monitoring
+# Methods specific to deploy-time monitoring
 ####
 
 
@@ -680,8 +680,9 @@ def get_monitoring_errors(version, minute):
     requested version and each entry is a tuple with format
     (error_def, count) where error_def is a dictionary and count is a number.
     """
-    keys = r.zrevrange("ver:MON_%s:errors_by_minute:%d" % (version, minute),
-            0, 1000, withscores=True)
+    keys = r.zrevrange("ver:MON_%s:unique_errors_by_minute:%d"
+                       % (version, minute), 0, 1000, withscores=True)
+
     errors = [(_get_cached_error_def(k), count) for k, count in keys]
     return [e for e in errors if e[0] is not None]
 
@@ -737,10 +738,24 @@ def record_occurrence_during_monitoring(version, minute, status, level,
         r.expire("ver:MON_%s:errors_by_minute:%d" % (version, minute),
                  KEY_EXPIRY_SECONDS)
 
+        fast_key_expiry_seconds = 60 * 60  # expire in one hour
+        # errors from the last minute from a single ip
+        r.zincrby("ver:MON_%s:ip_%s:errors_by_minute:%d"
+                  % (version, ip, minute), error_key)
+        r.expire("ver:MON_%s:ip_%s:errors_by_minute:%d"
+                 % (version, ip, minute), fast_key_expiry_seconds)
 
-####
-## Anomaly detection methods
-####
+        num_ip_errors = r.zscore("ver:MON_%s:ip_%s:errors_by_minute:%d"
+                                 % (version, ip, minute), error_key)
+        if num_ip_errors == 1:
+            # if first time seeing error from this ip, increment
+            # number of unique errors
+            r.zincrby("ver:MON_%s:unique_errors_by_minute:%d"
+                      % (version, minute), error_key)
+            r.expire("ver:MON_%s:unique_errors_by_minute:%d"
+                     % (version, minute), KEY_EXPIRY_SECONDS)
+
+# Anomaly detection methods
 
 
 def get_routes():
@@ -790,7 +805,7 @@ def get_hourly_responses_count(route, status_code):
 
 
 ####
-## Log scraping from BigQuery
+# Log scraping from BigQuery
 ####
 
 
@@ -825,9 +840,9 @@ def record_occurrence_from_errors(version, log_hour, status, level, resource,
         # granular time stats
 
         r.hincrby("ver:%s:error:%s:hours_seen" % (version, error_key),
-                log_hour, 1)
+                  log_hour, 1)
         r.expire("ver:%s:error:%s:hours_seen" % (version, error_key),
-                KEY_EXPIRY_SECONDS)
+                 KEY_EXPIRY_SECONDS)
 
         # Manage the running list of first_seen. If the first first_seen falls
         # out of the KEY_EXPIRY_SECONDS window, remove it.
@@ -838,7 +853,7 @@ def record_occurrence_from_errors(version, log_hour, status, level, resource,
             # Remove all of the expired entries
             expiry_log_hour_int = _get_log_hour_int_expiry()
             r.zremrangebyscore("first_seen:%s" % error_key,
-                0, expiry_log_hour_int)
+                               0, expiry_log_hour_int)
 
         # Always call add, since it will either overwrite or append
         log_hour_int = int(log_hour.replace("_", ""))

@@ -23,7 +23,7 @@ class ErrorMonitorTest(unittest.TestCase):
         # Simple implementation of 'scan', since it's missing from
         # `FakeStrictRedis`
         models.r.scan = lambda cursor, match, count: (
-                (0, models.r.keys(match)))
+            (0, models.r.keys(match)))
 
         # Get a test app we can make requests against
         self.app = server.app.test_client()
@@ -40,8 +40,8 @@ class ErrorMonitorTest(unittest.TestCase):
             'version': 'v000'
         }
         rv = self.app.post('/monitor',
-                data=json.dumps(monitor_data),
-                headers={"Content-type": "application/json"})
+                           data=json.dumps(monitor_data),
+                           headers={"Content-type": "application/json"})
         assert rv.status_code == 200
 
         # Monitoring is kind of useless here since we have no history, so
@@ -54,34 +54,34 @@ class ErrorMonitorTest(unittest.TestCase):
         # Now add some actual errors
         monitor_data = {
             'logs': [
-                # A unique error!
+                # Unique errors from separate ip addresses
                 {"status": 500, "level": 4, "resource": "/test",
                     "ip": "1.1.1.1", "route": "/test", "module_id": "default",
                     "message": "Error while parsing directive 1"},
 
-                # This error should be grouped with the previous one
+                # Unique errors from separate ip addresses
                 {"status": 500, "level": 4, "resource": "/test",
-                    "ip": "1.1.1.1", "route": "/test", "module_id": "default",
+                    "ip": "1.1.1.2", "route": "/test", "module_id": "default",
                     "message": "Error while parsing directive 2"},
 
                 # This error should be grouped with the previous one
                 {"status": 500, "level": 4, "resource": "/test",
-                    "ip": "1.1.1.1", "route": "/test", "module_id": "default",
+                    "ip": "1.1.1.3", "route": "/test", "module_id": "default",
                     "message": "Error while parsing directive 3"},
 
                 # This error should be grouped with the previous one
                 {"status": 500, "level": 4, "resource": "/test",
-                    "ip": "1.1.1.1", "route": "/test", "module_id": "default",
+                    "ip": "1.1.1.4", "route": "/test", "module_id": "default",
                     "message": "Error while parsing directive 4"},
 
                 # This error should be grouped with the previous one
                 {"status": 500, "level": 4, "resource": "/test",
-                    "ip": "1.1.1.1", "route": "/test", "module_id": "default",
+                    "ip": "1.1.1.5", "route": "/test", "module_id": "default",
                     "message": "Error while parsing directive 5"},
 
                 # This error should be grouped with the previous one
                 {"status": 500, "level": 4, "resource": "/test",
-                    "ip": "1.1.1.1", "route": "/test", "module_id": "default",
+                    "ip": "1.1.1.6", "route": "/test", "module_id": "default",
                     "message": "Error while parsing directive 6"},
 
                 # This error will be ignored because the URI is blacklisted
@@ -96,27 +96,47 @@ class ErrorMonitorTest(unittest.TestCase):
                 {"status": 500, "level": 4, "resource": "/leia",
                     "ip": "1.1.1.1", "route": "/leia", "module_id": "default",
                     "message": "Error Help me, Obi Wan Kenobi. You're my only "
-                        "hope"},
+                    "hope"},
                 {"status": 500, "level": 4, "resource": "/leia",
-                    "ip": "1.1.1.1", "route": "/luke", "module_id": "default",
+                    "ip": "1.1.1.2", "route": "/luke", "module_id": "default",
                     "message": "Error Help me, Obi Wan Kenobi. Train me in "
-                        "ways of the force"},
+                    "ways of the force"},
                 {"status": 500, "level": 4, "resource": "/leia",
-                    "ip": "1.1.1.1", "route": "/luke", "module_id": "default",
+                    "ip": "1.1.1.3", "route": "/luke", "module_id": "default",
                     "message": "Error Help me, Obi Wan Kenobi. Train me in "
-                        "ways of the schwartz."},
+                    "ways of the schwartz."},
                 {"status": 500, "level": 4, "resource": "/leia",
-                    "ip": "1.1.1.1", "route": "/luke", "module_id": "default",
+                    "ip": "1.1.1.4", "route": "/luke", "module_id": "default",
                     "message": "Error Help me, Obi Wan Kenobi. Train me in "
-                        "ways of the warts."},
+                    "ways of the warts."},
                 {"status": 500, "level": 4, "resource": "/leia",
-                    "ip": "1.1.1.1", "route": "/luke", "module_id": "default",
+                    "ip": "1.1.1.5", "route": "/luke", "module_id": "default",
                     "message": "Error Help me, Obi Wan Kenobi. Train me in "
-                        "ways of the jorts."},
+                    "ways of the jorts."},
                 {"status": 500, "level": 4, "resource": "/leia",
-                    "ip": "1.1.1.1", "route": "/luke", "module_id": "default",
+                    "ip": "1.1.1.6", "route": "/luke", "module_id": "default",
                     "message": "Error Help me, Obi Wan Kenobi. Train me in "
-                        "ways of the basketball courts."},
+                    "ways of the basketball courts."},
+
+                # A unique error all from the same ip address
+                {"status": 500, "level": 4, "resource": "/han",
+                    "ip": "1.1.1.1", "route": "/han", "module_id": "default",
+                    "message": "Yoooooo"},
+                {"status": 500, "level": 4, "resource": "/han",
+                    "ip": "1.1.1.1", "route": "/han", "module_id": "default",
+                    "message": "Yoooooo"},
+                {"status": 500, "level": 4, "resource": "/han",
+                    "ip": "1.1.1.1", "route": "/han", "module_id": "default",
+                    "message": "Yoooooo"},
+                {"status": 500, "level": 4, "resource": "/han",
+                    "ip": "1.1.1.1", "route": "/han", "module_id": "default",
+                    "message": "Yoooooo"},
+                {"status": 500, "level": 4, "resource": "/han",
+                    "ip": "1.1.1.1", "route": "/han", "module_id": "default",
+                    "message": "Yoooooo"},
+                {"status": 500, "level": 4, "resource": "/han",
+                    "ip": "1.1.1.1", "route": "/han", "module_id": "default",
+                    "message": "Yoooooo"},
 
                 # A third unique error, but it's ignored because
                 # singleton errors are ignored.
@@ -128,8 +148,8 @@ class ErrorMonitorTest(unittest.TestCase):
             'version': 'v001'
         }
         rv = self.app.post('/monitor',
-                data=json.dumps(monitor_data),
-                headers={"Content-type": "application/json"})
+                           data=json.dumps(monitor_data),
+                           headers={"Content-type": "application/json"})
         assert rv.status_code == 200
 
         # The monitor results should also show some new errors.
@@ -142,6 +162,8 @@ class ErrorMonitorTest(unittest.TestCase):
         assert 'directive 5' not in rv.data
         assert 'directive 1' not in rv.data
         assert 'blacklisted' not in rv.data
+        assert 'single ip error' not in rv.data
+        assert 'Yoooooo' not in rv.data
         assert 'Obi Wan' in rv.data
         ret = json.loads(rv.data)
         assert 'errors' in ret
@@ -174,37 +196,37 @@ class ErrorMonitorTest(unittest.TestCase):
                     "ip": "1.1.1.1", "route": "/leia", "module_id": "default",
                     "message": "Help me, Obi Wan Kenobi. You're my only hope"},
                 {"status": 500, "level": 4, "resource": "/leia",
-                    "ip": "1.1.1.1", "route": "/leia", "module_id": "default",
+                    "ip": "1.1.1.2", "route": "/leia", "module_id": "default",
                     "message": "Help me, Obi Wan Kenobi. You're my only hope"},
                 {"status": 500, "level": 4, "resource": "/leia",
-                    "ip": "1.1.1.1", "route": "/leia", "module_id": "default",
+                    "ip": "1.1.1.3", "route": "/leia", "module_id": "default",
                     "message": "Help me, Obi Wan Kenobi. You're my only hope"},
                 {"status": 500, "level": 4, "resource": "/leia",
-                    "ip": "1.1.1.1", "route": "/leia", "module_id": "default",
+                    "ip": "1.1.1.4", "route": "/leia", "module_id": "default",
                     "message": "Help me, Obi Wan Kenobi. You're my only hope"},
                 {"status": 500, "level": 4, "resource": "/leia",
-                    "ip": "1.1.1.1", "route": "/leia", "module_id": "default",
+                    "ip": "1.1.1.5", "route": "/leia", "module_id": "default",
                     "message": "Help me, Obi Wan Kenobi. You're my only hope"},
                 {"status": 500, "level": 4, "resource": "/leia",
-                    "ip": "1.1.1.1", "route": "/leia", "module_id": "default",
+                    "ip": "1.1.1.6", "route": "/leia", "module_id": "default",
                     "message": "Help me, Obi Wan Kenobi. You're my only hope"},
                 {"status": 500, "level": 4, "resource": "/leia",
-                    "ip": "1.1.1.1", "route": "/leia", "module_id": "default",
+                    "ip": "1.1.1.7", "route": "/leia", "module_id": "default",
                     "message": "Help me, Obi Wan Kenobi. You're my only hope"},
                 {"status": 500, "level": 4, "resource": "/leia",
-                    "ip": "1.1.1.1", "route": "/leia", "module_id": "default",
+                    "ip": "1.1.1.8", "route": "/leia", "module_id": "default",
                     "message": "Help me, Obi Wan Kenobi. You're my only hope"},
                 {"status": 500, "level": 4, "resource": "/leia",
-                    "ip": "1.1.1.1", "route": "/leia", "module_id": "default",
+                    "ip": "1.1.1.9", "route": "/leia", "module_id": "default",
                     "message": "Help me, Obi Wan Kenobi. You're my only hope"},
                 {"status": 500, "level": 4, "resource": "/leia",
-                    "ip": "1.1.1.1", "route": "/leia", "module_id": "default",
+                    "ip": "1.1.1.10", "route": "/leia", "module_id": "default",
                     "message": "Help me, Obi Wan Kenobi. You're my only hope"},
                 {"status": 500, "level": 4, "resource": "/leia",
-                    "ip": "1.1.1.1", "route": "/leia", "module_id": "default",
+                    "ip": "1.1.1.11", "route": "/leia", "module_id": "default",
                     "message": "Help me, Obi Wan Kenobi. You're my only hope"},
                 {"status": 500, "level": 4, "resource": "/leia",
-                    "ip": "1.1.1.1", "route": "/leia", "module_id": "default",
+                    "ip": "1.1.1.12", "route": "/leia", "module_id": "default",
                     "message": "Help me, Obi Wan Kenobi. You're my only hope"},
 
 
@@ -214,30 +236,30 @@ class ErrorMonitorTest(unittest.TestCase):
                     "ip": "1.1.1.1", "route": "/home", "module_id": "default",
                     "message": "There's no place like home."},
                 {"status": 404, "level": 4, "resource": "/home",
-                    "ip": "1.1.1.1", "route": "/home", "module_id": "default",
+                    "ip": "1.1.1.2", "route": "/home", "module_id": "default",
                     "message": "There's no place like home."},
                 {"status": 404, "level": 4, "resource": "/home",
-                    "ip": "1.1.1.1", "route": "/home", "module_id": "default",
+                    "ip": "1.1.1.3", "route": "/home", "module_id": "default",
                     "message": "There's no place like home."},
                 {"status": 404, "level": 4, "resource": "/home",
-                    "ip": "1.1.1.1", "route": "/home", "module_id": "default",
+                    "ip": "1.1.1.4", "route": "/home", "module_id": "default",
                     "message": "There's no place like home."},
                 {"status": 404, "level": 4, "resource": "/home",
-                    "ip": "1.1.1.1", "route": "/home", "module_id": "default",
+                    "ip": "1.1.1.5", "route": "/home", "module_id": "default",
                     "message": "There's no place like home."},
                 {"status": 404, "level": 4, "resource": "/home",
-                    "ip": "1.1.1.1", "route": "/home", "module_id": "default",
+                    "ip": "1.1.1.6", "route": "/home", "module_id": "default",
                     "message": "There's no place like home."},
                 {"status": 404, "level": 4, "resource": "/home",
-                    "ip": "1.1.1.1", "route": "/home", "module_id": "default",
+                    "ip": "1.1.1.7", "route": "/home", "module_id": "default",
                     "message": "There's no place like home."},
             ],
             'minute': 0,
             'version': 'v002'
         }
         rv = self.app.post('/monitor',
-                data=json.dumps(monitor_data),
-                headers={"Content-type": "application/json"})
+                           data=json.dumps(monitor_data),
+                           headers={"Content-type": "application/json"})
         assert rv.status_code == 200
 
         # Now the monitor results should show some new errors
@@ -371,8 +393,8 @@ class ErrorMonitorTest(unittest.TestCase):
             'version': 'vx001'
         }
         rv = self.app.post('/monitor',
-                data=json.dumps(monitor_data),
-                headers={"Content-type": "application/json"})
+                           data=json.dumps(monitor_data),
+                           headers={"Content-type": "application/json"})
         assert rv.status_code == 200
 
         # Add a new error to the database for a new version
@@ -387,8 +409,8 @@ class ErrorMonitorTest(unittest.TestCase):
             'version': 'vx002'
         }
         rv = self.app.post('/monitor',
-                data=json.dumps(monitor_data),
-                headers={"Content-type": "application/json"})
+                           data=json.dumps(monitor_data),
+                           headers={"Content-type": "application/json"})
         assert rv.status_code == 200
 
         # Check that "recent errors" includes both errors
@@ -420,7 +442,7 @@ class RequestMonitorTest(unittest.TestCase):
         # Simple implementation of 'scan', since it's missing from
         # `FakeStrictRedis`
         models.r.scan = lambda cursor, match, count: (
-                (0, models.r.keys(match)))
+            (0, models.r.keys(match)))
 
         # Set the number of hours per week to be 1 so we don't have to
         # generate large time series.
