@@ -2,6 +2,7 @@
 import argparse
 import decimal
 import json
+import re
 
 import flask
 import logging
@@ -44,6 +45,11 @@ _ERROR_BLACKLIST_THRESHOLDS = [
     # but they do.  They're a 200 and in the worst case just mean we didn't
     # send logs to graphite.
     ('ApplicationError: 4 Unknown error', 100),
+    # Memcache set errors; these likely indicate some contention, and mean
+    # we're wasting work, but are 200s.  They tend to increase a bit on
+    # deploys.  See https://app.asana.com/0/31965416896056/182669804238387.
+    (re.compile(r'google\.appengine\.api\.memcache set failed on chunk for '
+                r'[^ ]* user_models.get_students_data'), 100),
 ]
 
 
@@ -84,8 +90,12 @@ def poisson_cdf(actual, mean):
 
 def _matches_blacklist(logline, count):
     for error, threshold in _ERROR_BLACKLIST_THRESHOLDS:
-        if error in logline and count <= threshold:
-            return True
+        if isinstance(error, basestring):
+            if error in logline and count <= threshold:
+                return True
+        else:  # it's a regex
+            if error.search(logline) and count <= threshold:
+                return True
     return False
 
 
