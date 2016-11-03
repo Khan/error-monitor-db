@@ -171,7 +171,7 @@ def _parse_error_info(error_dict, start_date, end_date):
 
     return _ErrorInfo(key=error_dict['error_def']['key'],
                       title=error_dict['error_def']['title'],
-                      status=int(error_dict['error_def'].get('status', 0)),
+                      status=int(error_dict['error_def'].get('status') or 0),
                       count=count,
                       dates_seen=dates_seen,
                       first_date_seen=error_dict['first_seen'])
