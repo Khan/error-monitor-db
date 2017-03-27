@@ -185,7 +185,8 @@ class BigQuery(object):
             ) = [v['v'] for v in record['f']]
 
             # Never record errors for znd versions
-            if not re.match(r'\d{6}-\d{4}-[0-9a-f]{12}', version_id):
+            if (version_id is None or
+                    not re.match(r'\d{6}-\d{4}-[0-9a-f]{12}', version_id)):
                 continue
 
             error_key, is_new = models.record_occurrence_from_errors(
