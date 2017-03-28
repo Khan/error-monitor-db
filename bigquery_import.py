@@ -184,7 +184,10 @@ class BigQuery(object):
                 module_id
             ) = [v['v'] for v in record['f']]
 
-            # Never record errors for znd versions
+            # Never record errors for znd versions.
+            # `version_id` may also be None for some logs from the service
+            # bridge on managed VMs.  We ignore these because most of the other
+            # fields are None too, and we can't do much with them.
             if (version_id is None or
                     not re.match(r'\d{6}-\d{4}-[0-9a-f]{12}', version_id)):
                 continue
