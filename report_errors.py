@@ -78,7 +78,7 @@ def _send_alert_to_asana(error_info):
                    (error_info.count, error_info.key,
                     error_info.title, error_info.status))
 
-    asana_project = 'Bug Bucket - Triage Center (Cory)'
+    asana_project = 'Bug Bucket - Triage Center'
     alertlib.Alert(error_notes, summary=error_name, severity=logging.WARNING
                    ).send_to_asana(project=asana_project)
 
