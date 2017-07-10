@@ -26,6 +26,7 @@ reasons:
 
   https://console.developers.google.com/project/124072386181/apiui/credential
 """
+import calendar
 import datetime
 import httplib2
 import json
@@ -48,6 +49,8 @@ import models
 # The AppEngine project number for 'khan' (NOT 'khan-academy' for historical
 # reasons) where we store our BigQuery tables.
 PROJECT_NUMBER = '124072386181'
+LOG_COMPLETION_URL_BASE = (
+    'https://www.khanacademy.org/api/internal/logs/completed')
 
 
 class TableNotFoundError(Exception):
@@ -258,6 +261,35 @@ def _urlize(error_key):
             % (error_key, error_key))
 
 
+def _log_hour_is_complete(log_hour):
+    """Check with the webapp log completion API if the logs are completed.
+
+    Since logs stream directly into the hourly tables, we use a heuristic to
+    check if we're pretty sure the logs for the hour have all arrived.
+
+    If they're not complete, we hold off on ingesting this hour.
+    """
+    # Add an hour because the completion timestamps we need to supply
+    # correspond to the end of the interval.
+    log_dt = (
+        datetime.datetime.strptime(log_hour, '%Y%m%d_%H') +
+        datetime.timedelta(hours=1))
+    timestamp = calendar.timegm(log_dt.utctimetuple())
+    completion_url = '%s?end_time=%s' % (
+        LOG_COMPLETION_URL_BASE,
+        timestamp)
+    resp, content = httplib2.Http().request(completion_url, method='GET')
+    status = resp['status']
+    if status != '200':
+        logging.error(
+            'Unexpectedly got status %s when fetching log completion '
+            'from %s.  Check the appengine logs for more info.' % (
+                status, completion_url))
+        return False
+    else:
+        return json.loads(content)
+
+
 def import_logs(date_str):
     """Import both the request and error logs from bigquery.
 
@@ -271,6 +303,10 @@ def import_logs(date_str):
 
         try:
             if models.check_log_data_received(log_hour):
+                continue
+
+            if not _log_hour_is_complete(log_hour):
+                print "BigQuery table for %s is not complete yet." % log_hour
                 continue
 
             bq.requests_from_bigquery(log_hour)
@@ -290,6 +326,20 @@ def import_logs(date_str):
                           "please re-run the application manually to "
                           "re-authorize")
 
+    print "Done fetching logs."
+
+
+def import_daily_logs(date_str):
+    """Like import_logs, but use daily instead of hourly tables.
+
+    Useful if you're importing historical data from further in the past than
+    we keep hourly log tables.
+
+    Note that we don't check that this day's logs are complete using webapp's
+    log completion API; this is intended for manual backfilling use, and we
+    assume you know what you're doing.
+    """
+    bq = BigQuery()
     if not models.check_log_data_received(date_str + "_00"):
         print "Trying to fetch daily logs."
         # We aren't partially through fetching hourly request logs so try
@@ -328,6 +378,21 @@ if __name__ == "__main__":
                       default=datetime.datetime.utcnow().strftime("%Y%m%d"),
                       help="Date (in UTC) to import logs for, in format "
                            "YYYYMMDD. If omitted, use today's date.")
+    parser.add_option("--use-daily-tables", dest="use_daily",
+                      default=False, action="store_true",
+                      help="Use the daily log tables to import logs, instead "
+                      "of the hourly ones. This will happen automatically if "
+                      "we're loading a date more than 7 days ago. (Within 7 "
+                      "days, you might want to use this to backfill data "
+                      "quickly.)")
     (options, args) = parser.parse_args()
 
-    import_logs(options.date_str)
+    # If we're loading logs for more than 7 days ago, we won't have hourly
+    # tables, so use daily ones instead.
+    days_ago = (datetime.datetime.utcnow() -
+                datetime.datetime.strptime(options.date_str, '%Y%m%d')).days
+
+    if options.use_daily or days_ago > 7:
+        import_daily_logs(options.date_str)
+    else:
+        import_logs(options.date_str)
