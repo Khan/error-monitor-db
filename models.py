@@ -162,6 +162,24 @@ _VERSION_PATH_PREFIX_RE = re.compile(r'^.*\d{4}-\d{4}-[a-f0-9]{12}\.\d+/')
 # Keys in the error def that represent identifiers
 _ERROR_ID_KEYS = ["id0", "id1", "id2", "id3"]
 
+# Normally we combine errors that start with the same first/last few words, but
+# we don't do this if they match one of the following regexes.  If the regex
+# has a capturing group, we use that as an id (id3 which is reserved for
+# special cases) -- otherwise we just fall back to the full title (less any
+# numbers, namely id0).
+_NON_COMBINABLE_ERRORS = [
+    # The object and attribute names are very relevant for these!  We use the
+    # full title.
+    re.compile(r'object has no attribute'),
+    # The endpoint is very interesting here!  Flask has already removed any
+    # URL params, so we use the full title.
+    re.compile(r'^Error in signature for'),
+    # The interesting part of these is the function for which the set failed --
+    # so we combine only when those match.  (We do strip the args/kwargs when
+    # possible.)
+    re.compile(r"""^(Memcache set failed for [^([{'"]*)"""),
+]
+
 r = redis.StrictRedis(host='localhost', port=6379, db=0)
 
 
@@ -363,21 +381,28 @@ def _parse_message(message, status, level):
 
     # Various identifying traits
     #
-    # The title with numbers removed
+    # id0 is the title with numbers removed
     id_prefix = str("%s %s " % (status, level))
     error_def['id0'] = (
         id_prefix + re.sub(r'\d+', '%%', error_def['title']))
 
-    # The first 3 words of the title
-    error_def['id1'] = (
-        id_prefix + " ".join(error_def['id0'].split(" ")[2:5]))
-
-    # The last 3 words of the title
-    error_def['id2'] = (
-        id_prefix + " ".join(error_def['id0'].split(" ")[-3:]))
-
-    # Special-cases
-    error_def['id3'] = None
+    for regexp in _NON_COMBINABLE_ERRORS:
+        m = regexp.search(error_def['title'])
+        if m:
+            # If this error is special-cased, don't use id1 and id2, and use
+            # the first group, if any, for id3.
+            error_def['id1'] = None
+            error_def['id2'] = None
+            error_def['id3'] = m.group(1) if m.groups() else None
+            break
+    else:
+        # Otherwisse, id1 and id2 are, respectively, the first and last 3 words
+        # of the title, and we don't use id3.
+        error_def['id1'] = (
+            id_prefix + " ".join(error_def['id0'].split(" ")[2:5]))
+        error_def['id2'] = (
+            id_prefix + " ".join(error_def['id0'].split(" ")[-3:]))
+        error_def['id3'] = None
 
     # Build a hash of the identifiers to serve as a single unique
     # identifier for the error

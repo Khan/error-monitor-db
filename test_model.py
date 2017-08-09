@@ -98,5 +98,139 @@ class ModelTest(unittest.TestCase):
         self.assertEquals(count[2], 1)
 
 
+class TestParseMessage(unittest.TestCase):
+    def test_simple(self):
+        # TODO(benkraft): Test stacktrace parsing.
+        error_def, _, __ = models._parse_message(
+            'Error on line 214: File not found', '200', '3')
+        error_def.pop('key')  # We don't check the key.
+        self.assertEqual(
+            error_def, {
+                'title': 'Error on line 214: File not found',
+                'status': '200',
+                'level': '3',
+                'id0': '200 3 Error on line %%: File not found',
+                'id1': '200 3 Error on line',
+                'id2': '200 3 File not found',
+                'id3': None,
+            })
+
+    def test_no_attribute(self):
+        error_def, _, __ = models._parse_message(
+            "'NoneType' object has no attribute 'some_attribute'", '500', '3')
+        error_def.pop('key')
+        self.assertEqual(
+            error_def, {
+                'title': "'NoneType' object has no attribute 'some_attribute'",
+                'status': '500',
+                'level': '3',
+                'id0': ("500 3 'NoneType' object has no attribute "
+                        "'some_attribute'"),
+                'id1': None,
+                'id2': None,
+                'id3': None,
+            })
+
+        error_def, _, __ = models._parse_message(
+            "'User' object has no attribute '_User__email'", '500', '3')
+        error_def.pop('key')
+        self.assertEqual(
+            error_def, {
+                'title': "'User' object has no attribute '_User__email'",
+                'status': '500',
+                'level': '3',
+                'id0': ("500 3 'User' object has no attribute '_User__email'"),
+                'id1': None,
+                'id2': None,
+                'id3': None,
+            })
+
+    def test_sig_error(self):
+        error_def, _, __ = models._parse_message(
+            "Error in signature for "
+            "/api/internal/user/progress_summary[methods=['GET']]. "
+            "Reverting to jsonify.", '200', '3')
+        error_def.pop('key')
+        self.assertEqual(
+            error_def, {
+                'title': ("Error in signature for "
+                          "/api/internal/user/progress_summary"
+                          "[methods=['GET']]. Reverting to jsonify."),
+                'status': '200',
+                'level': '3',
+                'id0': ("200 3 Error in signature for "
+                        "/api/internal/user/progress_summary"
+                        "[methods=['GET']]. Reverting to jsonify."),
+                'id1': None,
+                'id2': None,
+                'id3': None,
+            })
+
+    def test_memcache_set_error(self):
+        # Function with no args
+        error_def, _, __ = models._parse_message(
+            "Memcache set failed for content.exercise_models._name_table",
+            '200', '3')
+        error_def.pop('key')
+        self.assertEqual(
+            error_def, {
+                'title': ("Memcache set failed for "
+                          "content.exercise_models._name_table"),
+                'status': '200',
+                'level': '3',
+                'id0': ("200 3 Memcache set failed for "
+                          "content.exercise_models._name_table"),
+                'id1': None,
+                'id2': None,
+                'id3': ("Memcache set failed for "
+                        "content.exercise_models._name_table"),
+            })
+
+        # Function with args
+        error_def, _, __ = models._parse_message(
+            "Memcache set failed for "
+            "prediction.models.get_model_for_job_and_exercise."
+            "('23aaed', u'some-topic-slug')",
+            '200', '3')
+        error_def.pop('key')
+        self.assertEqual(
+            error_def, {
+                'title': ("Memcache set failed for "
+                          "prediction.models.get_model_for_job_and_exercise."
+                          "('23aaed', u'some-topic-slug')"),
+                'status': '200',
+                'level': '3',
+                'id0': ("200 3 Memcache set failed for "
+                        "prediction.models.get_model_for_job_and_exercise."
+                        "('%%aaed', u'some-topic-slug')"),
+                'id1': None,
+                'id2': None,
+                'id3': ("Memcache set failed for "
+                        "prediction.models.get_model_for_job_and_exercise."),
+            })
+        # Function with single string key param
+        error_def, _, __ = models._parse_message(
+            "Memcache set failed for "
+            "bibliotron.bibliotron_util.count_practiceable_content.'ag5zfm'",
+            '200', '3')
+        error_def.pop('key')
+        self.assertEqual(
+            error_def, {
+                'title': ("Memcache set failed for "
+                          "bibliotron.bibliotron_util."
+                          "count_practiceable_content.'ag5zfm'"),
+                'status': '200',
+                'level': '3',
+                'id0': ("200 3 Memcache set failed for "
+                        "bibliotron.bibliotron_util."
+                        "count_practiceable_content.'ag%%zfm'"),
+                'id1': None,
+                'id2': None,
+                'id3': ("Memcache set failed for "
+                        "bibliotron.bibliotron_util."
+                        "count_practiceable_content."),
+            })
+
+
 if __name__ == '__main__':
     unittest.main()
