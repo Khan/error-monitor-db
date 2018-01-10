@@ -13,7 +13,6 @@ import math
 import numpy
 import redis
 
-import detect_anomalies
 import models
 
 app = flask.Flask("Khan Academy Error Monitor")
@@ -190,30 +189,6 @@ def monitor():
     models.record_monitoring_data_received(version, minute)
 
     return "OK"
-
-
-@app.route("/anomalies/<log_hour>", methods=["get"])
-def recent_anomalies(log_hour):
-    """Get anomalies that happened at the date formatted as YYYYMMDD_HH."""
-    routes = models.get_routes()
-    # TODO: If there is no data for this hour we want to send an error.
-    anomaly_scores = detect_anomalies.find_anomalies_on_routes(log_hour,
-                                                               routes)
-    anomalies = []
-    for i in xrange(len(routes)):
-        # We only care about significant decreases in 200 responses.
-        if anomaly_scores[i] < -10:
-            anomalies.append({
-                "route": routes[i],
-                "status": HTTP_OK_CODE,
-                "count": models.get_responses_count(routes[i], HTTP_OK_CODE,
-                                                    log_hour),
-                "anomaly_score": anomaly_scores[i],
-            })
-
-    return json.dumps({
-        "anomalies": anomalies
-    })
 
 
 @app.route("/errors/<version_id>/monitor/<int:minute>", methods=["get"])
@@ -402,7 +377,7 @@ if __name__ == "__main__":
 
     if not app.debug:
         file_handler = logging.handlers.RotatingFileHandler(
-            '/home/ubuntu/logs/error-monitor-db-app.log',
+            '/var/log/error-monitor-db-app.log',
             maxBytes=1024 * 1024, backupCount=5)
         file_handler.setLevel(logging.WARNING)
         app.logger.addHandler(file_handler)

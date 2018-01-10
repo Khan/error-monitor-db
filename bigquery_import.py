@@ -18,13 +18,11 @@ daily logs (`daily_requests_from_bigquery`).
 
 To see how errors and requests are stored, see models.py.
 
-There is a dependency here that are not included in the repo for security
-reasons:
-
-  client_secrets.json - Contains the Google AppEngine "Client ID for native
-      application". To get this, go here and click "Download JSON":
-
-  https://console.developers.google.com/project/124072386181/apiui/credential
+This script authenticates using a service account. You need service account
+credentials to run it: https://phabricator.khanacademy.org/K283
+When you've downloaded that json file, pass the credentials file location as an
+env variable:
+GOOGLE_APPLICATION_CREDENTIALS=/path/to/credentials.json bigquery_import.py ...
 """
 import calendar
 import datetime
@@ -32,23 +30,17 @@ import httplib2
 import json
 import logging
 from optparse import OptionParser
-import os
 import pprint
 import re
-import time
 
-import apiclient.discovery
-import apiclient.errors
-
-import oauth2client.client
-import oauth2client.file
-import oauth2client.tools
+from google.cloud import bigquery
+from google.cloud import exceptions
 
 import models
 
-# The AppEngine project number for 'khan' (NOT 'khan-academy' for historical
+# The AppEngine project id for 'khan' (NOT 'khan-academy' for historical
 # reasons) where we store our BigQuery tables.
-PROJECT_NUMBER = '124072386181'
+PROJECT_ID = 'khanacademy.org:deductive-jet-827'
 LOG_COMPLETION_URL_BASE = (
     'https://www.khanacademy.org/api/internal/logs/completed')
 
@@ -69,26 +61,7 @@ class MissingBigQueryCredentialsError(Exception):
 class BigQuery(object):
     def __init__(self):
         """Initialize the BigQuery client, making sure we are authorized."""
-        dir = os.path.dirname(os.path.realpath(__file__))
-        flow = oauth2client.client.flow_from_clientsecrets(
-            '%s/client_secrets.json' % dir,
-            scope='https://www.googleapis.com/auth/bigquery')
-        storage = oauth2client.file.Storage(
-            '%s/bigquery_credentials.dat' % dir)
-        credentials = storage.get()
-
-        if credentials is None or credentials.invalid:
-            # Run oauth2 flow with default arguments.
-            credentials = oauth2client.tools.run_flow(
-                flow, storage,
-                oauth2client.tools.argparser.parse_args(
-                    ["--noauth_local_webserver"]))
-
-        http = httplib2.Http()
-        http = credentials.authorize(http)
-
-        self.bigquery_service = apiclient.discovery.build(
-            'bigquery', 'v2', http=http)
+        self.bigquery_service = bigquery.Client(project=PROJECT_ID)
 
     def run_query(self, sql):
         """A utility to execute a query on BigQuery.
@@ -107,59 +80,20 @@ class BigQuery(object):
                 }
             ]
         """
-        # Try a few times because occasionally BigQuery returns early without
-        # any response data
-        for attempt in xrange(3):
-            try:
-                # Create a query statement and query request object
-                query_data = {'query': sql}
-                query_request = self.bigquery_service.jobs()
+        try:
+            config = bigquery.job.QueryJobConfig()
+            config.use_legacy_sql = True
+            query_job = self.bigquery_service.query(
+                sql, job_config=config)
+            # This will block and wait for the job to complete
+            rows = query_job.result()
 
-                # Make a call to the BigQuery API
-                query_response = query_request.query(projectId=PROJECT_NUMBER,
-                                                     body=query_data).execute()
-
-            except apiclient.errors.HttpError as err:
-                err_json = json.loads(err.content)
-                # Traverse the unnecessarily complex JSON to check if the error
-                # is simply that the table was not found.
-                try:
-                    code = err_json['error']['code']
-                    message = err_json['error']['errors'][0]['message']
-                    reason = err_json['error']['errors'][0]['reason']
-                except (KeyError, IndexError):
-                    raise UnknownBigQueryError(err_json)
-
-                if reason == 'notFound':
-                    raise TableNotFoundError()
-                elif code >= 500:             # transient error, let's retry
-                    pass
-                elif (code == 403 and         # let's retry that too
-                        message.startswith('Exceeded rate limits')):
-                    pass                      # they *told* us to retry
-                elif ('Please try again' in message or
-                        'Retrying may solve the problem' in message or
-                        'Backend Error' in message):
-                    pass
-
-                raise UnknownBigQueryError(err_json)
-
-            except oauth2client.client.AccessTokenRefreshError:
-                raise MissingBigQueryCredentialsError()
-
-            if query_response.get('jobComplete', True) is False:
-                # This happens occasionally with no additional information, so
-                # for now just wait a bit and try again
-                time.sleep(60)
-                continue
-
-            if 'rows' not in query_response:
-                # Some other error happened that we didn't anticipate, so log
-                # the response which hopefully includes some kind of error
-                # message
-                raise UnknownBigQueryError(query_response)
-
-            return query_response['rows']
+        except exceptions.GoogleCloudError as err:
+            # TODO(colin): it's not clear to me what the format of this
+            # error message is from the documentation; do more
+            # sophisticated parsing here?
+            raise UnknownBigQueryError('%s: %s' % (err.message, err.errors))
+        return rows
 
     def errors_from_bigquery(self, log_hour):
         """Retrieve errors for the specified hour from BigQuery.
@@ -184,22 +118,20 @@ class BigQuery(object):
              'WHERE app_logs.level >= 3') % log_hour)
 
         for record in records:
-            (
-                version_id, ip, resource, status, level, message, route,
-                module_id
-            ) = [v['v'] for v in record['f']]
-
             # Never record errors for znd versions.
             # `version_id` may also be None for some logs from the service
             # bridge on managed VMs.  We ignore these because most of the other
             # fields are None too, and we can't do much with them.
-            if (version_id is None or
-                    not re.match(r'\d{6}-\d{4}-[0-9a-f]{12}', version_id)):
+            if (record.version_id is None or
+                    not re.match(r'\d{6}-\d{4}-[0-9a-f]{12}',
+                                 record.version_id)):
                 continue
 
             error_key, is_new = models.record_occurrence_from_errors(
-                version_id, log_hour, status, level, resource, ip, route,
-                module_id, message)
+                record.version_id, log_hour, record.status,
+                record.app_logs_level, record.resource, record.ip,
+                record.elog_url_route, record.module_id,
+                record.app_logs_message)
 
             if error_key:
                 if is_new:
@@ -224,15 +156,15 @@ class BigQuery(object):
         """
         print "Fetching hourly requests for %s" % log_hour
         records = self.run_query(
-            ('SELECT COUNT(*), status, elog_url_route '
+            ('SELECT COUNT(*) AS num_seen, status, elog_url_route '
              'FROM [logs_hourly.requestlogs_%s] '
              'WHERE elog_url_route IS NOT NULL '
              'GROUP BY status, elog_url_route HAVING COUNT(*) > 0') % log_hour)
 
         for record in records:
-            num_seen, status, route = [v['v'] for v in record['f']]
-            models.record_occurrences_from_requests(log_hour, status,
-                                                    route, num_seen)
+            models.record_occurrences_from_requests(
+                log_hour, record.status, record.elog_url_route,
+                record.num_seen)
 
     def daily_requests_from_bigquery(self, date):
         """Retrieve requests for the specified day from BigQuery.
@@ -242,18 +174,19 @@ class BigQuery(object):
         """
         print "Fetching daily requests for %s" % date
         records = self.run_query(
-            ('SELECT COUNT(*), HOUR(start_time_timestamp) AS log_hour, '
+            ('SELECT COUNT(*) AS num_seen, '
+             'HOUR(start_time_timestamp) AS log_hour, '
              'status, elog_url_route '
              'FROM [logs.requestlogs_%s] '
              'WHERE elog_url_route IS NOT NULL '
-             'GROUP BY log_hour, status, elog_url_route HAVING COUNT(*) > 0') %
-             date)
+             'GROUP BY log_hour, status, elog_url_route '
+             'HAVING COUNT(*) > 0') % date)
 
         for record in records:
-            num_seen, hour, status, route = [v['v'] for v in record['f']]
-            log_hour = "%s_%02d" % (date, int(hour))
-            models.record_occurrences_from_requests(log_hour, status,
-                                                    route, num_seen)
+            log_hour = "%s_%02d" % (date, int(record.log_hour))
+            models.record_occurrences_from_requests(
+                log_hour, record.status, record.elog_url_route,
+                record.num_seen)
 
 
 def _urlize(error_key):
