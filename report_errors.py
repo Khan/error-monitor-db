@@ -69,7 +69,7 @@ def _fetch_error_json(hostport):
     return json.load(urllib2.urlopen(url))
 
 
-def _send_alert_to_asana(error_info):
+def _send_alert_to_bugtracker(error_info):
     error_name = 'Top Daily Error: ' + str(error_info.title)
     error_notes = ('*Frequent error (%d occurrences recently):*\n'
                    'https://www.khanacademy.org/devadmin/errors/%s\n'
@@ -78,9 +78,9 @@ def _send_alert_to_asana(error_info):
                    (error_info.count, error_info.key,
                     error_info.title, error_info.status))
 
-    asana_project = 'Bug Bucket - Triage Center'
+    project_name = 'Learning Platform'
     alertlib.Alert(error_notes, summary=error_name, severity=logging.WARNING
-                   ).send_to_asana(project=asana_project)
+                   ).send_to_bugtracker(project_name=project_name)
 
 
 def _send_alerts_to_slack(slack_attachments, slack_channel):
@@ -219,8 +219,8 @@ def send_alerts_for_errors(hostport,
     """Process the error logs between start and end date and send a report.
 
     We always send the report to stdout.  If slack_channel is not None, we
-    send the report there as well. We also send the top error to Asana
-    as a new task if it does not already exist.
+    send the report there as well. We also send the top error to alertlib's
+    bugtracker as a new task if it does not already exist.
 
     Arguments:
         hostport: the host:port where the error-monitor server is running
@@ -282,11 +282,11 @@ def send_alerts_for_errors(hostport,
     slack_attachments[0]['mrkdwn_in'].append('pretext')
     _send_alerts_to_slack(slack_attachments, slack_channel)
 
-    # Send the top error to asana as a new task. No new task will be created
-    # if an unfinished one with the same name already exists (so that multiple
-    # tasks for the same error are not created).
+    # Send the top error to bugtracker as a new task. No new task will be
+    # created if an unfinished one with the same name already exists (so
+    # that multiple tasks for the same error are not created).
     if highlighted_errors:
-        _send_alert_to_asana(highlighted_errors[0])
+        _send_alert_to_bugtracker(highlighted_errors[0])
 
 
 if __name__ == "__main__":
