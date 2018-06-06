@@ -51,6 +51,14 @@ _ERROR_BLACKLIST_THRESHOLDS = [
     # deploys.  See https://app.asana.com/0/31965416896056/182669804238387.
     (re.compile(r'google\.appengine\.api\.memcache set failed on chunk for '
                 r'[^ ]* user_models.get_students_data'), 100),
+    # Request response timeout mostly coming from /_ah/queue/deferred; Like
+    # the request aborted above, these are increased significantly due to the
+    # deploy process routing traffic and are not likely due to the change.
+    ('Process terminated because the request deadline was exceeded', 100),
+    # Request response timeouts; Similar to above, these spike during deploy
+    # but are not the result of the change but of routing traffic. These
+    # errors usually spike to < 50, so more than that may be an issue.
+    ('DeadlineExceededError: The overall deadline for responding', 50),
 ]
 
 
