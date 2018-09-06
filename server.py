@@ -41,7 +41,7 @@ _ERROR_BLACKLIST_THRESHOLDS = [
     # bad, but they are probably a matter of insufficient priming or an
     # unrelated issue and not the deployer's fault, unless there are very large
     # numbers of them.
-    ('Request was aborted after waiting too long', 100),
+    ('Request was aborted after waiting too long', 800),
     # Failed send to graphite.  Not sure why these spike on deploy sometimes,
     # but they do.  They're a 200 and in the worst case just mean we didn't
     # send logs to graphite.
